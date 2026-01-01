@@ -7,6 +7,7 @@ ops_enabled             = true
 ops_workflow_id         = "ops-replay-and-quality-gate"
 ops_schedule_enabled    = false
 ops_schedule_expression = "rate(1 day)"
+glue_enabled            = true
 tags = {
   app = "serverless-elt"
 }
