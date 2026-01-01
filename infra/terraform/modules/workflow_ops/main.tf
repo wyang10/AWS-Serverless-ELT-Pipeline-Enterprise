@@ -19,6 +19,12 @@ variable "quality_lambda_arn" {
   type = string
 }
 
+variable "workflow_id" {
+  type        = string
+  default     = "ops"
+  description = "Short identifier used in resource names (e.g., ops-replay-and-quality-gate)."
+}
+
 variable "schedule_enabled" {
   type    = bool
   default = false
@@ -51,7 +57,7 @@ data "aws_iam_policy_document" "assume_sfn" {
 
 resource "aws_iam_role" "sfn" {
   count              = var.enabled ? 1 : 0
-  name               = "${var.name_prefix}-ops-sfn"
+  name               = "${var.name_prefix}-${var.workflow_id}-sfn"
   assume_role_policy = data.aws_iam_policy_document.assume_sfn.json
   tags               = var.tags
 }
@@ -65,7 +71,7 @@ data "aws_iam_policy_document" "sfn" {
 
 resource "aws_iam_role_policy" "sfn" {
   count  = var.enabled ? 1 : 0
-  name   = "${var.name_prefix}-ops-sfn"
+  name   = "${var.name_prefix}-${var.workflow_id}-sfn"
   role   = aws_iam_role.sfn[0].id
   policy = data.aws_iam_policy_document.sfn.json
 }
@@ -170,7 +176,7 @@ locals {
 
 resource "aws_sfn_state_machine" "ops" {
   count      = var.enabled ? 1 : 0
-  name       = "${var.name_prefix}-ops"
+  name       = "${var.name_prefix}-${var.workflow_id}"
   role_arn   = aws_iam_role.sfn[0].arn
   definition = local.definition
   tags       = var.tags
@@ -188,7 +194,7 @@ data "aws_iam_policy_document" "assume_events" {
 
 resource "aws_iam_role" "events" {
   count              = var.enabled && var.schedule_enabled ? 1 : 0
-  name               = "${var.name_prefix}-ops-events"
+  name               = "${var.name_prefix}-${var.workflow_id}-events"
   assume_role_policy = data.aws_iam_policy_document.assume_events.json
   tags               = var.tags
 }
@@ -202,14 +208,14 @@ data "aws_iam_policy_document" "events" {
 
 resource "aws_iam_role_policy" "events" {
   count  = var.enabled && var.schedule_enabled ? 1 : 0
-  name   = "${var.name_prefix}-ops-events"
+  name   = "${var.name_prefix}-${var.workflow_id}-events"
   role   = aws_iam_role.events[0].id
   policy = data.aws_iam_policy_document.events.json
 }
 
 resource "aws_cloudwatch_event_rule" "schedule" {
   count               = var.enabled && var.schedule_enabled ? 1 : 0
-  name                = "${var.name_prefix}-ops-schedule"
+  name                = "${var.name_prefix}-${var.workflow_id}-schedule"
   schedule_expression = var.schedule_expression
   tags                = var.tags
 }

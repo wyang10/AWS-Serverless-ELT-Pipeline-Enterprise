@@ -122,6 +122,7 @@ To enable in dev:
 - Build artifacts (adds `build/ops_replay.zip` + `build/ops_quality.zip`): `make build`
 - Set in `infra/terraform/envs/dev/dev.tfvars`:
   - `ops_enabled = true`
+  - `ops_workflow_id = "ops-replay-and-quality-gate"`
   - Optional schedule: `ops_schedule_enabled = true` and `ops_schedule_expression = "rate(1 day)"`
 - Deploy: `make tf-init` then `TF_AUTO_APPROVE=1 make tf-apply`
 

@@ -277,13 +277,14 @@ locals {
 module "ops_workflow" {
   count               = var.ops_enabled ? 1 : 0
   source              = "../../modules/workflow_ops"
-  enabled             = true
+  enabled             = var.ops_enabled
   name_prefix         = local.name
+  workflow_id         = var.ops_workflow_id
   region              = var.region
   replay_lambda_arn   = module.ops_replay_lambda[0].arn
   quality_lambda_arn  = module.ops_quality_lambda[0].arn
   schedule_enabled    = var.ops_schedule_enabled
   schedule_expression = var.ops_schedule_expression
   schedule_input      = local.ops_schedule_input
-  tags                = {}
+  tags                = local.tags
 }

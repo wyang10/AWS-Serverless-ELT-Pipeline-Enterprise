@@ -65,6 +65,11 @@ variable "ops_enabled" {
   default = false
 }
 
+variable "ops_workflow_id" {
+  type    = string
+  default = "ops-replay-and-quality-gate"
+}
+
 variable "ops_schedule_enabled" {
   type    = bool
   default = false
