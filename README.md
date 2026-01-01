@@ -124,7 +124,11 @@ aws sts get-caller-identity
 ### 3) 本地单测（可选但推荐）
 
 ```bash
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -r requirements-dev.txt
 make test
+
 ```
 
 ### 4) 构建 Lambda 打包产物（build/*.zip）
@@ -198,13 +202,16 @@ make ge-status
 make ge-history
 ```
 
-## E2E 验收清单（可截图）
+## E2E 验收清单（见截图）
 
 目标：按顺序过一遍就能留存证据。每一步都有「要点 → 命令/控制台路径 → 通过标准（截图点）」。
 
 建议先跑一键版（会依次执行多步 CLI 验证 + 造数 + 等待 Silver）：
 
 - `make verify-e2e`
+
+![](demo/0-1.png)
+![](demo/0-2.png)
 
 如果你希望固定用 IAM User profile（例如 `audrey-tf`），但本机没有该 profile：
 
@@ -217,7 +224,8 @@ make ge-history
 
 - 命令：`make verify-whoami`
 - 通过：`Account=818466672474`，且 Arn 对应你预期的身份（可为 `user/audrey-tf` 或 Toolkit 登录的 session）。
-- 截图点：终端输出整块（含 `AWS_PROFILE` / `AWS_REGION`）。
+- 截图：终端输出整块（含 `AWS_PROFILE` / `AWS_REGION`）。
+![](demo/0）我是谁（Profile:Region+Python环境）1.png)
 
 ### 1) Terraform 输出就绪
 
@@ -225,7 +233,10 @@ make ge-history
 
 - 命令：`make verify-tf-outputs`
 - 通过：输出里至少包含 `bronze_bucket` / `silver_bucket` / `queue_url` / `ingest_lambda` / `transform_lambda`。
-- 截图点：终端 output 整块。
+- 截图：终端 output。
+![](demo/1）Terraform用对了身份+Region.png)
+![](demo/1）Terraform用对了身份+Region-2.png)
+
 
 ### 2) S3 事件触发已就绪（bronze → ingest）
 
@@ -234,13 +245,15 @@ make ge-history
 - 命令：`make verify-s3-notifications`
 - 控制台：S3 → `<bronze_bucket>` → Properties → Event notifications
 - 通过：事件存在且目标 ARN 为 ingest。
-- 截图点：控制台 Event notification 卡片（或终端 table 输出）。
+- 截图：控制台 Event notification 卡片（或终端 table 输出）。
+![](demo/2.png)
 
 ### 3) Lambda 存在且可读（ingest / transform）
 
 - 命令：`make verify-lambdas`
 - 通过：输出 `OK ingest=...`、`OK transform=...`
-- 截图点：终端输出；控制台 Lambda → Monitor → Logs（任选其一）
+- 截图：终端输出；控制台 Lambda → Monitor → Logs
+![](demo/3.png)
 
 ### 4) 幂等表（DynamoDB）与 TTL（对象级别）
 
@@ -248,13 +261,15 @@ make ge-history
 
 - 命令：`make verify-ddb`
 - 通过：TTL `ENABLED`；scan 能看到 `pk/status` 等字段。
-- 截图点：终端 TTL 输出 + scan 输出（前几条即可）。
+- 截图：终端 TTL 输出 + scan 输出（前几条）。
+![](demo/4.png)
 
 ### 5) SQS / DLQ 健康
 
 - 命令：`make verify-sqs`
 - 通过：主队列消息数接近 0；DLQ 为 0。（消息“最老年龄”属于 CloudWatch 指标，不是 SQS attribute）
-- 截图点：终端 `get-queue-attributes` 输出；或 SQS 控制台 Monitoring 图表。
+- 截图：终端 `get-queue-attributes` 输出； SQS 控制台 Monitoring 图表。
+![](demo/5.png)
 
 ### 6) 造数触发 E2E（S3 → ingest → SQS → transform → Silver）
 
@@ -262,13 +277,15 @@ make ge-history
 
 - 命令：`make verify-seed`（会把本次上传写入 `$(E2E_LAST_SEED_FILE)`）
 - 通过：上传成功（终端会打印 `s3://<bronze>/<key>`）
-- 截图点：终端输出 + S3 控制台里该对象 Key
+- 截图：终端输出 + S3 控制台里该对象 Key
+![](demo/6.png)
 
 ### 7) Silver 产出 Parquet（等待窗口）
 
 - 命令：`make verify-silver`
 - 通过：最近 `$(VERIFY_WINDOW_MINUTES)` 分钟内能观测到 `silver/shipments/` 下新增 parquet。
-- 截图点：终端 OK 输出；或 S3 控制台显示 parquet 文件列表。
+- 截图：终端 OK 输出；或 S3 控制台显示 parquet 文件列表。
+![](demo/7.png)
 
 ### 8) 幂等验收（同一对象重复触发会被跳过）
 
@@ -276,7 +293,8 @@ make ge-history
 
 - 命令：`make verify-idempotency`
 - 通过：第二次 invoke 输出里 `skipped>=1`，并打印 `OK: second invoke skipped`。
-- 截图点：终端 first/second 两段输出。
+- 截图：终端 first/second 两段输出。
+![](demo/7) 幂等验收卡住（profile + key + lambda invoke）.png)
 
 ### 9) Glue / Athena（可选）
 
@@ -284,7 +302,8 @@ make ge-history
 
 - 命令：`make verify-glue`
 - 通过：crawler `LastCrawl=SUCCEEDED`；能看到 database 名称。
-- 截图点：Glue 控制台表结构页 + Athena 查询结果（见下方 “Athena quick queries”）。
+- 截图：Glue 控制台表结构页 + Athena 查询结果（见下方 “Athena quick queries”）。
+![](demo/9.png)
 
 ### 10) GE 质量门禁（可选）
 
@@ -292,7 +311,8 @@ make ge-history
 
 - 命令：`make verify-ge`（列出最近执行；手动触发用 `make ge-start`）
 - 通过：能看到最近的 executions；或至少 state machine 存在。
-- 截图点：Step Functions execution 详情（Glue task 绿勾）或终端 list-executions 输出。
+- 截图：Step Functions execution 详情（Glue task 绿勾）或终端 list-executions 输出。
+![](demo/10.png)
 
 ### 11) CloudWatch Dashboard（可选）
 
@@ -300,7 +320,7 @@ make ge-history
 
 - 命令：`make verify-observability`
 - 通过：输出 `OK dashboard=...`
-- 截图点：CloudWatch Dashboard 预览页。
+- 截图：CloudWatch Dashboard 预览页。
 
 ## Quickstart (dev)
 
