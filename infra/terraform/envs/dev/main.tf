@@ -34,6 +34,11 @@ locals {
   use_external_queue = var.existing_queue_url != null && var.existing_queue_arn != null
 }
 
+locals {
+  glue_database_name = var.glue_database_name != null ? var.glue_database_name : "${replace(lower(local.name), "-", "_")}_silver"
+  glue_crawler_name  = var.glue_crawler_name != null ? var.glue_crawler_name : "${local.name}-silver-crawler"
+}
+
 module "bronze_bucket" {
   source = "../../modules/s3_bucket"
   name   = "${local.name}-bronze"
@@ -288,4 +293,22 @@ module "ops_workflow" {
   schedule_expression = var.ops_schedule_expression
   schedule_input      = local.ops_schedule_input
   tags                = {}
+}
+
+module "glue_catalog" {
+  count              = var.glue_enabled ? 1 : 0
+  source             = "../../modules/glue_catalog"
+  enabled            = var.glue_enabled
+  database_name      = local.glue_database_name
+  crawler_name       = local.glue_crawler_name
+  silver_bucket_name = module.silver_bucket.name
+  silver_bucket_arn  = module.silver_bucket.arn
+  silver_prefix      = var.glue_silver_prefix
+  table_prefix       = var.glue_table_prefix
+  recrawl_behavior   = var.glue_recrawl_behavior
+  iam_name_prefix    = local.iam_prefix
+
+  job_enabled    = var.glue_job_enabled
+  job_name       = var.glue_job_name
+  job_script_key = var.glue_job_script_key
 }

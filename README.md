@@ -152,6 +152,20 @@ To start it manually:
 - **Visibility**: both Lambdas log structured JSON lines; transform uses SQS partial batch response.
 - **Cost**: this uses only S3/SQS/Lambda/DynamoDB/CloudWatch.
 
+## Glue Data Catalog (Catalog + Crawler)
+
+Enable the crawler so Athena (or a future warehouse) can query Silver Parquet as tables.
+
+- Set in `infra/terraform/envs/dev/dev.tfvars`:
+  - `glue_enabled = true`
+  - Optional: `glue_silver_prefix = "silver/"` (default) and `glue_table_prefix = "silver_"`
+- Deploy: `TF_AUTO_APPROVE=1 make tf-apply`
+- Run the crawler:
+  - Start: `make glue-crawler-start`
+  - Status: `make glue-crawler-status`
+
+After the crawler finishes, you should see a Glue database + tables; then you can query via Athena.
+
 ### IAM gotchas
 
 Some orgs allow creating IAM roles but **disallow tagging IAM/SQS** (missing `iam:TagRole` / `sqs:TagQueue`), which can show up as `AccessDenied` on `CreateRole`/`CreateQueue` when tags are included.

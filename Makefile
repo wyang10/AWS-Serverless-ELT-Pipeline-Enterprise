@@ -1,4 +1,4 @@
-.PHONY: help test build build-ingest build-transform build-ops-replay build-ops-quality clean tf-init tf-plan tf-apply tf-destroy ops-start ops-status ops-history
+.PHONY: help test build build-ingest build-transform build-ops-replay build-ops-quality clean tf-init tf-plan tf-apply tf-destroy ops-start ops-status ops-history glue-crawler-start glue-crawler-status
 
 PY ?= python3
 TF_DIR ?= infra/terraform/envs/dev
@@ -27,6 +27,8 @@ help:
 	@echo "  ops-start     Start Step Functions ops workflow (writes $(OPS_LAST_EXEC_FILE))"
 	@echo "  ops-status    Show Step Functions execution status (EXEC_ARN=... optional)"
 	@echo "  ops-history   Show recent execution events (EXEC_ARN=... optional)"
+	@echo "  glue-crawler-start  Start Glue crawler for Silver"
+	@echo "  glue-crawler-status Show Glue crawler status"
 
 test:
 	$(PY) -m pytest -q
@@ -142,3 +144,14 @@ ops-history:
 		fi; \
 	fi; \
 	aws stepfunctions get-execution-history --region $(AWS_REGION) --execution-arn "$$EXEC_ARN" --reverse-order --max-results 30
+
+glue-crawler-start:
+	@set -eu; \
+	CRAWLER=$$(terraform -chdir=$(TF_DIR) output -raw glue_crawler_name); \
+	aws glue start-crawler --region $(AWS_REGION) --name "$$CRAWLER"; \
+	echo "Started crawler $$CRAWLER"
+
+glue-crawler-status:
+	@set -eu; \
+	CRAWLER=$$(terraform -chdir=$(TF_DIR) output -raw glue_crawler_name); \
+	aws glue get-crawler --region $(AWS_REGION) --name "$$CRAWLER" --query 'Crawler.{Name:Name,State:State,LastCrawl:LastCrawl.Status}' --output json

@@ -115,6 +115,53 @@ variable "ops_max_attempts" {
   default = 20
 }
 
+variable "glue_enabled" {
+  type    = bool
+  default = false
+}
+
+variable "glue_database_name" {
+  type        = string
+  default     = null
+  description = "Glue database name for Silver tables. If null, a sanitized name derived from project will be used."
+}
+
+variable "glue_crawler_name" {
+  type        = string
+  default     = null
+  description = "Glue crawler name. If null, a name derived from project will be used."
+}
+
+variable "glue_silver_prefix" {
+  type    = string
+  default = "silver/"
+}
+
+variable "glue_table_prefix" {
+  type    = string
+  default = ""
+}
+
+variable "glue_recrawl_behavior" {
+  type    = string
+  default = "CRAWL_NEW_FOLDERS_ONLY"
+}
+
+variable "glue_job_enabled" {
+  type    = bool
+  default = false
+}
+
+variable "glue_job_name" {
+  type    = string
+  default = null
+}
+
+variable "glue_job_script_key" {
+  type    = string
+  default = "glue/scripts/compact_silver.py"
+}
+
 variable "bucket_suffix" {
   type    = string
   default = ""

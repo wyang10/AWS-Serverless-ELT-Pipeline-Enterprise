@@ -33,3 +33,27 @@ output "ops_state_machine" {
 output "ops_state_machine_arn" {
   value = length(module.ops_workflow) > 0 ? module.ops_workflow[0].state_machine_arn : null
 }
+
+output "glue_database_name" {
+  value = length(module.glue_catalog) > 0 ? module.glue_catalog[0].database_name : null
+}
+
+output "glue_crawler_name" {
+  value = length(module.glue_catalog) > 0 ? module.glue_catalog[0].crawler_name : null
+}
+
+output "glue_crawler_role_arn" {
+  value = length(module.glue_catalog) > 0 ? module.glue_catalog[0].crawler_role_arn : null
+}
+
+output "glue_job_name" {
+  value = length(module.glue_catalog) > 0 ? module.glue_catalog[0].job_name : null
+}
+
+output "glue_job_role_arn" {
+  value = length(module.glue_catalog) > 0 ? module.glue_catalog[0].job_role_arn : null
+}
+
+output "glue_job_script_s3_uri" {
+  value = length(module.glue_catalog) > 0 ? module.glue_catalog[0].job_script_s3_uri : null
+}
