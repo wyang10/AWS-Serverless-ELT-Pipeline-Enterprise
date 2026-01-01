@@ -1,3 +1,11 @@
+# AWS Serverless ELT Pipeline (Enterprise track)
+
+This repo is the **v2 / enterprise-ish track**. It starts from the v1 minimal serverless ELT and gradually adds orchestration, catalog, and data quality.
+
+Planned rollout: `ROADMAP.md`.
+
+---
+
 # AWS Serverless ELT Pipeline — S3 → Lambda → SQS → Lambda → S3 (Production-lite)
 
 ## An intentionally lite version of end to end serverless pipeline:
