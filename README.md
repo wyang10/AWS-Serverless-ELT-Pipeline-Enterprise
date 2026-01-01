@@ -166,6 +166,18 @@ Enable the crawler so Athena (or a future warehouse) can query Silver Parquet as
 
 After the crawler finishes, you should see a Glue database + tables; then you can query via Athena.
 
+## Glue Job (Compaction / Recompute)
+
+Optional next step: move “recompute / small-file compaction / per-day rerun” to a Glue job.
+
+- Enable the job in `infra/terraform/envs/dev/dev.tfvars`:
+  - `glue_job_enabled = true`
+  - Optional: `glue_job_name = "<name>"` and `glue_job_script_key = "glue/scripts/compact_silver.py"`
+- Deploy: `TF_AUTO_APPROVE=1 make tf-apply`
+- Run a compaction for a single partition:
+  - Start: `make glue-job-start GLUE_RECORD_TYPE=shipments GLUE_DT=2025-12-31 GLUE_OUTPUT_PREFIX=silver_compacted`
+  - Status: `make glue-job-status`
+
 ### IAM gotchas
 
 Some orgs allow creating IAM roles but **disallow tagging IAM/SQS** (missing `iam:TagRole` / `sqs:TagQueue`), which can show up as `AccessDenied` on `CreateRole`/`CreateQueue` when tags are included.

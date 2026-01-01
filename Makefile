@@ -1,4 +1,4 @@
-.PHONY: help test build build-ingest build-transform build-ops-replay build-ops-quality clean tf-init tf-plan tf-apply tf-destroy ops-start ops-status ops-history glue-crawler-start glue-crawler-status
+.PHONY: help test build build-ingest build-transform build-ops-replay build-ops-quality clean tf-init tf-plan tf-apply tf-destroy ops-start ops-status ops-history glue-crawler-start glue-crawler-status glue-job-start glue-job-status
 
 PY ?= python3
 TF_DIR ?= infra/terraform/envs/dev
@@ -16,6 +16,12 @@ OPS_POLL_INTERVAL_SECONDS ?= 30
 OPS_MAX_ATTEMPTS ?= 20
 OPS_LAST_EXEC_FILE ?= .last_ops_execution
 
+GLUE_RECORD_TYPE ?= shipments
+GLUE_DT ?= 2025-12-31
+GLUE_SILVER_PREFIX ?= silver
+GLUE_OUTPUT_PREFIX ?= silver_compacted
+GLUE_LAST_JOB_RUN_FILE ?= .last_glue_job_run
+
 help:
 	@echo "Targets:"
 	@echo "  test          Run unit tests"
@@ -29,6 +35,8 @@ help:
 	@echo "  ops-history   Show recent execution events (EXEC_ARN=... optional)"
 	@echo "  glue-crawler-start  Start Glue crawler for Silver"
 	@echo "  glue-crawler-status Show Glue crawler status"
+	@echo "  glue-job-start      Start Glue compaction job (GLUE_RECORD_TYPE/GLUE_DT/GLUE_OUTPUT_PREFIX)"
+	@echo "  glue-job-status     Show last Glue job run status"
 
 test:
 	$(PY) -m pytest -q
@@ -155,3 +163,33 @@ glue-crawler-status:
 	@set -eu; \
 	CRAWLER=$$(terraform -chdir=$(TF_DIR) output -raw glue_crawler_name); \
 	aws glue get-crawler --region $(AWS_REGION) --name "$$CRAWLER" --query 'Crawler.{Name:Name,State:State,LastCrawl:LastCrawl.Status}' --output json
+
+glue-job-start:
+	@set -eu; \
+	JOB=$$(terraform -chdir=$(TF_DIR) output -raw glue_job_name); \
+	if [ -z "$$JOB" ]; then \
+		echo "glue_job_name output is empty. Enable the job first (glue_job_enabled=true) and re-apply."; exit 1; \
+	fi; \
+	SILVER=$$(terraform -chdir=$(TF_DIR) output -raw silver_bucket); \
+	TMP=$$(mktemp); \
+	aws glue start-job-run --region $(AWS_REGION) --job-name "$$JOB" \
+	  --arguments "{\"--SILVER_BUCKET\":\"$$SILVER\",\"--SILVER_PREFIX\":\"$(GLUE_SILVER_PREFIX)\",\"--RECORD_TYPE\":\"$(GLUE_RECORD_TYPE)\",\"--DT\":\"$(GLUE_DT)\",\"--OUTPUT_PREFIX\":\"$(GLUE_OUTPUT_PREFIX)\"}" \
+	  > "$$TMP"; \
+	cat "$$TMP"; \
+	RUN_ID=$$($(PY) -c 'import json, sys; print(json.load(sys.stdin)["JobRunId"])' < "$$TMP"); \
+	echo "$$RUN_ID" > "$(GLUE_LAST_JOB_RUN_FILE)"; \
+	rm -f "$$TMP"; \
+	echo "Saved JobRunId to $(GLUE_LAST_JOB_RUN_FILE)"
+
+glue-job-status:
+	@set -eu; \
+	JOB=$$(terraform -chdir=$(TF_DIR) output -raw glue_job_name); \
+	if [ -z "$$JOB" ]; then \
+		echo "glue_job_name output is empty. Enable the job first (glue_job_enabled=true) and re-apply."; exit 1; \
+	fi; \
+	if [ ! -f "$(GLUE_LAST_JOB_RUN_FILE)" ]; then \
+		echo "Missing $(GLUE_LAST_JOB_RUN_FILE). Run 'make glue-job-start' first."; exit 1; \
+	fi; \
+	RUN_ID=$$(cat "$(GLUE_LAST_JOB_RUN_FILE)"); \
+	aws glue get-job-run --region $(AWS_REGION) --job-name "$$JOB" --run-id "$$RUN_ID" \
+	  --query 'JobRun.{Id:Id,JobName:JobName,JobRunState:JobRunState,StartedOn:StartedOn,CompletedOn:CompletedOn,ErrorMessage:ErrorMessage}' --output json
