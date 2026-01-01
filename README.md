@@ -105,6 +105,41 @@ Two options depending on your IAM permissions:
 - **Replay directly to SQS**: reads Bronze objects and publishes events straight into SQS (requires `sqs:SendMessage` on the queue).
   - `python scripts/replay_from_s3.py --bucket <bronze_bucket> --prefix bronze/shipments/ --queue-url <queue_url> --start 2026-01-01T00:00:00Z --end 2026-01-02T00:00:00Z`
 
+## Ops workflow (EventBridge + Step Functions)
+
+The v2 track adds a minimal “ops” workflow that can be run manually or on a schedule:
+
+- **Replay/backfill** by copying S3 objects to a new key under `bronze/` (triggers the normal ingest path)
+- **Inspect** by checking Silver contains recent Parquet outputs (poll + retry)
+
+Terraform wiring lives in:
+
+- `infra/terraform/modules/workflow_ops/main.tf`
+- `infra/terraform/envs/dev/main.tf`
+
+To enable in dev:
+
+- Build artifacts (adds `build/ops_replay.zip` + `build/ops_quality.zip`): `make build`
+- Set in `infra/terraform/envs/dev/dev.tfvars`:
+  - `ops_enabled = true`
+  - Optional schedule: `ops_schedule_enabled = true` and `ops_schedule_expression = "rate(1 day)"`
+- Deploy: `make tf-init` then `TF_AUTO_APPROVE=1 make tf-apply`
+
+To start it manually:
+
+- `aws stepfunctions start-execution --region us-east-2 --state-machine-arn $(terraform -chdir=infra/terraform/envs/dev output -raw ops_state_machine_arn) --input '{
+  "bronze_bucket":"<bronze_bucket>",
+  "src_prefix":"bronze/shipments/",
+  "dest_prefix_base":"bronze/replay/manual",
+  "window_hours":24,
+  "silver_bucket":"<silver_bucket>",
+  "silver_prefix":"silver",
+  "record_type":"shipments",
+  "min_parquet_objects":1,
+  "poll_interval_seconds":30,
+  "max_attempts":20
+}'`
+
 ## Notes
 
 - **Idempotency scope**: ingest is idempotent at *S3 object* granularity (`bucket/key#etag`).

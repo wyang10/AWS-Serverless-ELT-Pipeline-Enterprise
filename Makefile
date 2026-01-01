@@ -1,4 +1,4 @@
-.PHONY: help test build build-ingest build-transform clean tf-init tf-plan tf-apply tf-destroy
+.PHONY: help test build build-ingest build-transform build-ops-replay build-ops-quality clean tf-init tf-plan tf-apply tf-destroy
 
 PY ?= python3
 TF_DIR ?= infra/terraform/envs/dev
@@ -9,7 +9,7 @@ TF_AUTO_APPROVE ?= 0
 help:
 	@echo "Targets:"
 	@echo "  test          Run unit tests"
-	@echo "  build         Build both lambda zip artifacts into ./$(BUILD_DIR)"
+	@echo "  build         Build lambda zip artifacts into ./$(BUILD_DIR)"
 	@echo "  tf-init       terraform init (dev env)"
 	@echo "  tf-plan       terraform plan (dev env)"
 	@echo "  tf-apply      terraform apply (dev env)"
@@ -18,7 +18,7 @@ help:
 test:
 	$(PY) -m pytest -q
 
-build: build-ingest build-transform
+build: build-ingest build-transform build-ops-replay build-ops-quality
 
 build-ingest:
 	rm -rf $(BUILD_DIR)/ingest && mkdir -p $(BUILD_DIR)/ingest
@@ -41,6 +41,30 @@ build-transform:
 	cp -R lambdas/shared $(BUILD_DIR)/transform/lambdas/shared
 	find $(BUILD_DIR)/transform -type d -name '__pycache__' -prune -exec rm -rf {} +
 	cd $(BUILD_DIR)/transform && zip -qr ../transform.zip .
+
+build-ops-replay:
+	rm -rf $(BUILD_DIR)/ops_replay && mkdir -p $(BUILD_DIR)/ops_replay
+	rm -f $(BUILD_DIR)/ops_replay.zip
+	mkdir -p $(BUILD_DIR)/ops_replay/lambdas/workflows/replay
+	cp -R lambdas/__init__.py $(BUILD_DIR)/ops_replay/lambdas/__init__.py
+	cp -R lambdas/workflows/__init__.py $(BUILD_DIR)/ops_replay/lambdas/workflows/__init__.py
+	cp -R lambdas/workflows/replay/__init__.py $(BUILD_DIR)/ops_replay/lambdas/workflows/replay/__init__.py
+	cp -R lambdas/workflows/replay/app.py $(BUILD_DIR)/ops_replay/lambdas/workflows/replay/app.py
+	cp -R lambdas/shared $(BUILD_DIR)/ops_replay/lambdas/shared
+	find $(BUILD_DIR)/ops_replay -type d -name '__pycache__' -prune -exec rm -rf {} +
+	cd $(BUILD_DIR)/ops_replay && zip -qr ../ops_replay.zip .
+
+build-ops-quality:
+	rm -rf $(BUILD_DIR)/ops_quality && mkdir -p $(BUILD_DIR)/ops_quality
+	rm -f $(BUILD_DIR)/ops_quality.zip
+	mkdir -p $(BUILD_DIR)/ops_quality/lambdas/workflows/quality
+	cp -R lambdas/__init__.py $(BUILD_DIR)/ops_quality/lambdas/__init__.py
+	cp -R lambdas/workflows/__init__.py $(BUILD_DIR)/ops_quality/lambdas/workflows/__init__.py
+	cp -R lambdas/workflows/quality/__init__.py $(BUILD_DIR)/ops_quality/lambdas/workflows/quality/__init__.py
+	cp -R lambdas/workflows/quality/app.py $(BUILD_DIR)/ops_quality/lambdas/workflows/quality/app.py
+	cp -R lambdas/shared $(BUILD_DIR)/ops_quality/lambdas/shared
+	find $(BUILD_DIR)/ops_quality -type d -name '__pycache__' -prune -exec rm -rf {} +
+	cd $(BUILD_DIR)/ops_quality && zip -qr ../ops_quality.zip .
 
 clean:
 	rm -rf $(BUILD_DIR)

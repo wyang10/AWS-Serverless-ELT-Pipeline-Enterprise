@@ -47,7 +47,7 @@ resource "aws_iam_role" "transform" {
 
 data "aws_iam_policy_document" "basic_logs" {
   statement {
-    actions = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
     resources = ["arn:aws:logs:*:*:*"]
   }
 }
@@ -56,7 +56,7 @@ data "aws_iam_policy_document" "ingest" {
   source_policy_documents = [data.aws_iam_policy_document.basic_logs.json]
 
   statement {
-    actions = ["s3:ListBucket", "s3:GetBucketLocation"]
+    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
     resources = [var.bronze_bucket_arn]
   }
 

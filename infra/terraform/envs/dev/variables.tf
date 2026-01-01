@@ -60,6 +60,56 @@ variable "alarm_notification_topic_arn" {
   description = "Optional SNS topic ARN for CloudWatch alarm actions."
 }
 
+variable "ops_enabled" {
+  type    = bool
+  default = false
+}
+
+variable "ops_schedule_enabled" {
+  type    = bool
+  default = false
+}
+
+variable "ops_schedule_expression" {
+  type    = string
+  default = "rate(1 day)"
+}
+
+variable "ops_src_prefix" {
+  type    = string
+  default = "bronze/shipments/"
+}
+
+variable "ops_dest_prefix_base" {
+  type    = string
+  default = "bronze/replay/scheduled"
+}
+
+variable "ops_window_hours" {
+  type    = number
+  default = 24
+}
+
+variable "ops_record_type" {
+  type    = string
+  default = "shipments"
+}
+
+variable "ops_min_parquet_objects" {
+  type    = number
+  default = 1
+}
+
+variable "ops_poll_interval_seconds" {
+  type    = number
+  default = 30
+}
+
+variable "ops_max_attempts" {
+  type    = number
+  default = 20
+}
+
 variable "bucket_suffix" {
   type    = string
   default = ""

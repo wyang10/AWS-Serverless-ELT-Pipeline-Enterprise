@@ -25,3 +25,11 @@ output "transform_lambda" {
 output "dashboard_name" {
   value = module.observability.dashboard_name
 }
+
+output "ops_state_machine" {
+  value = length(module.ops_workflow) > 0 ? module.ops_workflow[0].state_machine_name : null
+}
+
+output "ops_state_machine_arn" {
+  value = length(module.ops_workflow) > 0 ? module.ops_workflow[0].state_machine_arn : null
+}

@@ -13,7 +13,7 @@ terraform {
 }
 
 provider "aws" {
-  region = var.region
+  region  = var.region
   profile = var.profile
 }
 
@@ -26,9 +26,9 @@ resource "random_id" "iam_suffix" {
 }
 
 locals {
-  suffix = var.bucket_suffix != "" ? var.bucket_suffix : random_id.suffix.hex
-  name   = "${var.project}-${local.suffix}"
-  tags   = var.tags
+  suffix     = var.bucket_suffix != "" ? var.bucket_suffix : random_id.suffix.hex
+  name       = "${var.project}-${local.suffix}"
+  tags       = var.tags
   iam_prefix = var.iam_name_prefix != null ? "${var.iam_name_prefix}-${random_id.iam_suffix.hex}" : local.name
 
   use_external_queue = var.existing_queue_url != null && var.existing_queue_arn != null
@@ -128,31 +128,162 @@ module "transform_lambda" {
   timeout       = 60
   memory_size   = 512
   environment = {
-    SILVER_BUCKET         = module.silver_bucket.name
-    SILVER_PREFIX         = "silver"
-    MAX_RECORDS_PER_FILE  = "5000"
-    LOG_LEVEL             = "INFO"
+    SILVER_BUCKET        = module.silver_bucket.name
+    SILVER_PREFIX        = "silver"
+    MAX_RECORDS_PER_FILE = "5000"
+    LOG_LEVEL            = "INFO"
   }
   tags = local.tags
 }
 
 module "sqs_to_transform" {
-  source               = "../../modules/lambda_event_source_mapping"
-  function_arn         = module.transform_lambda.arn
-  event_source_arn     = local.queue_arn
-  batch_size           = 10
+  source                  = "../../modules/lambda_event_source_mapping"
+  function_arn            = module.transform_lambda.arn
+  event_source_arn        = local.queue_arn
+  batch_size              = 10
   function_response_types = ["ReportBatchItemFailures"]
 }
 
 module "observability" {
-  source                = "../../modules/observability"
-  enabled               = var.observability_enabled
-  name_prefix           = local.name
-  region                = var.region
-  ingest_lambda_name    = module.ingest_lambda.name
-  transform_lambda_name = module.transform_lambda.name
-  queue_name            = local.queue_name
-  dlq_name              = local.dlq_name
+  source                 = "../../modules/observability"
+  enabled                = var.observability_enabled
+  name_prefix            = local.name
+  region                 = var.region
+  ingest_lambda_name     = module.ingest_lambda.name
+  transform_lambda_name  = module.transform_lambda.name
+  queue_name             = local.queue_name
+  dlq_name               = local.dlq_name
   notification_topic_arn = var.alarm_notification_topic_arn
-  tags                  = local.tags
+  tags                   = local.tags
+}
+
+data "aws_iam_policy_document" "assume_lambda_workflows" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "basic_logs_workflows" {
+  statement {
+    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["arn:aws:logs:*:*:*"]
+  }
+}
+
+data "aws_iam_policy_document" "ops_replay" {
+  source_policy_documents = [data.aws_iam_policy_document.basic_logs_workflows.json]
+
+  statement {
+    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
+    resources = [module.bronze_bucket.arn]
+  }
+
+  statement {
+    actions   = ["s3:GetObject", "s3:PutObject"]
+    resources = ["${module.bronze_bucket.arn}/*"]
+  }
+}
+
+resource "aws_iam_role" "ops_replay" {
+  count              = var.ops_enabled ? 1 : 0
+  name               = "${local.iam_prefix}-ops-replay"
+  assume_role_policy = data.aws_iam_policy_document.assume_lambda_workflows.json
+  tags               = {}
+}
+
+resource "aws_iam_role_policy" "ops_replay" {
+  count  = var.ops_enabled ? 1 : 0
+  name   = "${local.iam_prefix}-ops-replay"
+  role   = aws_iam_role.ops_replay[0].id
+  policy = data.aws_iam_policy_document.ops_replay.json
+}
+
+data "aws_iam_policy_document" "ops_quality" {
+  source_policy_documents = [data.aws_iam_policy_document.basic_logs_workflows.json]
+
+  statement {
+    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
+    resources = [module.silver_bucket.arn]
+  }
+}
+
+resource "aws_iam_role" "ops_quality" {
+  count              = var.ops_enabled ? 1 : 0
+  name               = "${local.iam_prefix}-ops-quality"
+  assume_role_policy = data.aws_iam_policy_document.assume_lambda_workflows.json
+  tags               = {}
+}
+
+resource "aws_iam_role_policy" "ops_quality" {
+  count  = var.ops_enabled ? 1 : 0
+  name   = "${local.iam_prefix}-ops-quality"
+  role   = aws_iam_role.ops_quality[0].id
+  policy = data.aws_iam_policy_document.ops_quality.json
+}
+
+module "ops_replay_lambda" {
+  count         = var.ops_enabled ? 1 : 0
+  source        = "../../modules/lambda_fn"
+  function_name = "${local.name}-ops-replay"
+  description   = "Step Functions task: replay S3 objects by copy (triggers ingest)"
+  filename      = "${path.module}/../../../../build/ops_replay.zip"
+  handler       = "lambdas.workflows.replay.app.handler"
+  role_arn      = aws_iam_role.ops_replay[0].arn
+  timeout       = 900
+  memory_size   = 512
+  environment = {
+    LOG_LEVEL = "INFO"
+  }
+  tags = local.tags
+}
+
+module "ops_quality_lambda" {
+  count         = var.ops_enabled ? 1 : 0
+  source        = "../../modules/lambda_fn"
+  function_name = "${local.name}-ops-quality"
+  description   = "Step Functions task: verify recent silver Parquet outputs exist"
+  filename      = "${path.module}/../../../../build/ops_quality.zip"
+  handler       = "lambdas.workflows.quality.app.handler"
+  role_arn      = aws_iam_role.ops_quality[0].arn
+  timeout       = 60
+  memory_size   = 256
+  environment = {
+    LOG_LEVEL = "INFO"
+  }
+  tags = local.tags
+}
+
+locals {
+  ops_schedule_input = {
+    bronze_bucket    = module.bronze_bucket.name
+    src_prefix       = var.ops_src_prefix
+    dest_prefix_base = var.ops_dest_prefix_base
+    window_hours     = var.ops_window_hours
+
+    silver_bucket       = module.silver_bucket.name
+    silver_prefix       = "silver"
+    record_type         = var.ops_record_type
+    min_parquet_objects = var.ops_min_parquet_objects
+
+    poll_interval_seconds = var.ops_poll_interval_seconds
+    max_attempts          = var.ops_max_attempts
+  }
+}
+
+module "ops_workflow" {
+  count               = var.ops_enabled ? 1 : 0
+  source              = "../../modules/workflow_ops"
+  enabled             = true
+  name_prefix         = local.name
+  region              = var.region
+  replay_lambda_arn   = module.ops_replay_lambda[0].arn
+  quality_lambda_arn  = module.ops_quality_lambda[0].arn
+  schedule_enabled    = var.ops_schedule_enabled
+  schedule_expression = var.ops_schedule_expression
+  schedule_input      = local.ops_schedule_input
+  tags                = {}
 }
