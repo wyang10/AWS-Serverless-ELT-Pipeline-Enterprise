@@ -39,6 +39,14 @@ locals {
   glue_crawler_name  = var.glue_crawler_name != null ? var.glue_crawler_name : "${local.name}-silver-crawler"
 }
 
+locals {
+  ge_job_name = var.ge_job_name != null ? var.ge_job_name : "${local.iam_prefix}-ge-validate-silver"
+}
+
+locals {
+  ge_workflow_active = var.ge_enabled && var.ge_workflow_enabled
+}
+
 module "bronze_bucket" {
   source = "../../modules/s3_bucket"
   name   = "${local.name}-bronze"
@@ -77,13 +85,14 @@ module "idempotency_table" {
 }
 
 module "iam" {
-  source                = "../../modules/iam"
-  name_prefix           = local.iam_prefix
-  bronze_bucket_arn     = module.bronze_bucket.arn
-  silver_bucket_arn     = module.silver_bucket.arn
-  queue_arn             = local.queue_arn
-  idempotency_table_arn = module.idempotency_table.arn
-  tags                  = {}
+  source                         = "../../modules/iam"
+  name_prefix                    = local.iam_prefix
+  bronze_bucket_arn              = module.bronze_bucket.arn
+  silver_bucket_arn              = module.silver_bucket.arn
+  queue_arn                      = local.queue_arn
+  idempotency_table_arn          = module.idempotency_table.arn
+  eventbridge_put_events_enabled = var.ge_emit_events_from_transform
+  tags                           = {}
 }
 
 module "ingest_lambda" {
@@ -133,10 +142,14 @@ module "transform_lambda" {
   timeout       = 60
   memory_size   = 512
   environment = {
-    SILVER_BUCKET        = module.silver_bucket.name
-    SILVER_PREFIX        = "silver"
-    MAX_RECORDS_PER_FILE = "5000"
-    LOG_LEVEL            = "INFO"
+    SILVER_BUCKET               = module.silver_bucket.name
+    SILVER_PREFIX               = "silver"
+    MAX_RECORDS_PER_FILE        = "5000"
+    LOG_LEVEL                   = "INFO"
+    QUALITY_EVENTBRIDGE_ENABLED = var.ge_emit_events_from_transform ? "true" : "false"
+    QUALITY_EVENTBUS_NAME       = var.ge_event_bus_name
+    QUALITY_EVENT_SOURCE        = var.ge_event_source
+    QUALITY_EVENT_DETAIL_TYPE   = var.ge_event_detail_type
   }
   tags = local.tags
 }
@@ -311,4 +324,39 @@ module "glue_catalog" {
   job_enabled    = var.glue_job_enabled
   job_name       = var.glue_job_name
   job_script_key = var.glue_job_script_key
+}
+
+module "ge_job" {
+  count                     = var.ge_enabled ? 1 : 0
+  source                    = "../../modules/glue_ge_validation"
+  enabled                   = var.ge_enabled
+  job_name                  = local.ge_job_name
+  silver_bucket_name        = module.silver_bucket.name
+  silver_bucket_arn         = module.silver_bucket.arn
+  script_key                = var.ge_job_script_key
+  iam_name_prefix           = local.iam_prefix
+  additional_python_modules = var.ge_additional_python_modules
+}
+
+module "ge_workflow" {
+  count                    = local.ge_workflow_active ? 1 : 0
+  source                   = "../../modules/workflow_ge_gate"
+  enabled                  = local.ge_workflow_active
+  name_prefix              = local.name
+  region                   = var.region
+  iam_name_prefix          = local.iam_prefix
+  workflow_id              = var.ge_workflow_id
+  silver_bucket_arn        = module.silver_bucket.arn
+  glue_job_name            = module.ge_job[0].job_name
+  eventbridge_enabled      = var.ge_eventbridge_enabled
+  eventbridge_event_source = var.ge_event_source
+  eventbridge_detail_type  = var.ge_event_detail_type
+  notification_topic_arn = (
+    var.ge_notification_topic_arn != null && var.ge_notification_topic_arn != "" ?
+    var.ge_notification_topic_arn :
+    var.alarm_notification_topic_arn
+  )
+  quarantine_enabled = var.ge_quarantine_enabled
+  quarantine_prefix  = var.ge_quarantine_prefix
+  tags               = {}
 }

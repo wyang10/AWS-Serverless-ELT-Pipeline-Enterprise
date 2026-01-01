@@ -1,6 +1,9 @@
-# AWS Serverless ELT Pipeline (Enterprise track)
+# AWS Serverless ELT Pipeline (Enterprise track) — v2.0
 
-This repo is the **v2 / enterprise-ish track**. It starts from the v1 minimal serverless ELT and gradually adds orchestration, catalog, and data quality.
+This repo is the **v2.0 / enterprise-ish track**. It starts from the v1 minimal serverless ELT and adds orchestration, catalog, and data quality.
+
+- v1 (minimal): S3 → Lambda → SQS → Lambda → S3 Parquet
+- v2.0 (this repo): v1 + Step Functions ops workflow + Glue Catalog/Crawler + Glue Jobs + Great Expectations quality gate
 
 Planned rollout: `ROADMAP.md`.
 
@@ -35,6 +38,15 @@ S3 (bronze/*.jsonl)
               └─ DLQ (optional)
                                 └─ S3 (silver/*.parquet)
 ```
+
+## v1 vs v2.0 highlights
+
+- **v1** focuses on the core pipeline and idempotent ingestion.
+- **v2.0** adds “enterprise-ish” operability:
+  - Step Functions **ops workflow** for replay/backfill + quality polling (`make ops-start`)
+  - Glue **Data Catalog + Crawler** so Athena can query Silver as tables
+  - Glue **compaction/recompute job** (safe outputs to a separate prefix)
+  - Great Expectations **quality gate** implemented as a Glue job orchestrated by Step Functions
 
 ## Repo layout
 
@@ -177,6 +189,91 @@ Optional next step: move “recompute / small-file compaction / per-day rerun”
 - Run a compaction for a single partition:
   - Start: `make glue-job-start GLUE_RECORD_TYPE=shipments GLUE_DT=2025-12-31 GLUE_OUTPUT_PREFIX=silver_compacted`
   - Status: `make glue-job-status`
+
+## Great Expectations (Quality Gate)
+
+Run Great Expectations inside a Glue job, orchestrated by Step Functions as a “quality gate”.
+
+- Enable in `infra/terraform/envs/dev/dev.tfvars`:
+  - `ge_enabled = true` (creates the Glue GE job)
+  - `ge_workflow_enabled = true` (creates the Step Functions gate)
+  - Optional auto-trigger from transform:
+    - `ge_emit_events_from_transform = true`
+    - `ge_eventbridge_enabled = true`
+  - Optional failure handling:
+    - `ge_notification_topic_arn = "<sns_topic_arn>"` (or reuse `alarm_notification_topic_arn`)
+    - `ge_quarantine_enabled = true` (writes a marker JSON to `ge_quarantine_prefix`)
+- Deploy: `TF_AUTO_APPROVE=1 make tf-apply`
+- Manual run:
+  - `make ge-start GE_RECORD_TYPE=shipments GE_DT=2025-12-31 GE_RESULT_PREFIX=ge/results`
+  - `make ge-status`
+  - `make ge-history`
+
+### Auto-trigger (optional)
+
+Two toggles control whether the GE gate runs automatically after `transform` writes a partition:
+
+- Keep **manual** (recommended for dev / controlled runs):
+  - `ge_emit_events_from_transform = false`
+  - `ge_eventbridge_enabled = false`
+- Enable **auto-trigger** (recommended for “prod-like” behavior):
+  - `ge_emit_events_from_transform = true` (transform emits an EventBridge event per written partition)
+  - `ge_eventbridge_enabled = true` (EventBridge rule starts the GE state machine)
+
+When auto-trigger is on, every successful transform write may trigger a validation run; keep it off if you are iterating quickly or don’t want extra runs/cost.
+
+## Athena quick queries
+
+Get the Glue database name from Terraform:
+
+- `terraform -chdir=infra/terraform/envs/dev output -raw glue_database_name`
+
+Then run queries (replace `<db>` with that value):
+
+```sql
+-- 1) Latest shipments
+SELECT dt, shipment_id, origin, destination, carrier, weight_kg, event_time
+FROM "<db>".silver
+WHERE record_type = 'shipments'
+ORDER BY dt DESC, event_time DESC
+LIMIT 20;
+
+-- 2) Row counts per partition/day
+SELECT dt, COUNT(*) AS rows
+FROM "<db>".silver
+WHERE record_type = 'shipments'
+GROUP BY dt
+ORDER BY dt DESC;
+
+-- 3) Simple sanity checks (range / uniqueness signal)
+SELECT
+  dt,
+  MIN(weight_kg) AS min_weight_kg,
+  MAX(weight_kg) AS max_weight_kg,
+  APPROX_DISTINCT(shipment_id) AS approx_unique_shipments
+FROM "<db>".silver
+WHERE record_type = 'shipments'
+GROUP BY dt
+ORDER BY dt DESC;
+```
+
+## Cleanup (cost control)
+
+Terraform destroy will remove most resources, but **S3 buckets must be empty** first.
+
+- Destroy:
+  - `TF_AUTO_APPROVE=1 make tf-destroy`
+- If destroy fails because buckets are not empty:
+  - `BRONZE=$(terraform -chdir=infra/terraform/envs/dev output -raw bronze_bucket)`
+  - `SILVER=$(terraform -chdir=infra/terraform/envs/dev output -raw silver_bucket)`
+  - `aws s3 rm "s3://$BRONZE" --recursive --region us-east-2`
+  - `aws s3 rm "s3://$SILVER" --recursive --region us-east-2`
+  - Re-run: `TF_AUTO_APPROVE=1 make tf-destroy`
+
+Notes:
+
+- If you enabled Glue resources, Terraform will attempt to delete the Glue database/crawler/job; if anything is left behind, remove it in the Glue console.
+- If you used an externally-managed SQS queue via `infra/terraform/envs/dev/*.auto.tfvars.json`, Terraform won’t delete that queue; delete it separately if needed.
 
 ### IAM gotchas
 

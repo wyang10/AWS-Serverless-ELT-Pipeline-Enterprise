@@ -1,4 +1,4 @@
-.PHONY: help test build build-ingest build-transform build-ops-replay build-ops-quality clean tf-init tf-plan tf-apply tf-destroy ops-start ops-status ops-history glue-crawler-start glue-crawler-status glue-job-start glue-job-status
+.PHONY: help test build build-ingest build-transform build-ops-replay build-ops-quality clean tf-init tf-plan tf-apply tf-destroy ops-start ops-status ops-history glue-crawler-start glue-crawler-status glue-job-start glue-job-status ge-start ge-status ge-history
 
 PY ?= python3
 TF_DIR ?= infra/terraform/envs/dev
@@ -22,6 +22,12 @@ GLUE_SILVER_PREFIX ?= silver
 GLUE_OUTPUT_PREFIX ?= silver_compacted
 GLUE_LAST_JOB_RUN_FILE ?= .last_glue_job_run
 
+GE_RECORD_TYPE ?= shipments
+GE_DT ?= 2025-12-31
+GE_SILVER_PREFIX ?= silver
+GE_RESULT_PREFIX ?= ge/results
+GE_LAST_EXEC_FILE ?= .last_ge_execution
+
 help:
 	@echo "Targets:"
 	@echo "  test          Run unit tests"
@@ -37,6 +43,9 @@ help:
 	@echo "  glue-crawler-status Show Glue crawler status"
 	@echo "  glue-job-start      Start Glue compaction job (GLUE_RECORD_TYPE/GLUE_DT/GLUE_OUTPUT_PREFIX)"
 	@echo "  glue-job-status     Show last Glue job run status"
+	@echo "  ge-start            Start GE quality gate state machine"
+	@echo "  ge-status           Show GE execution status (EXEC_ARN=... optional)"
+	@echo "  ge-history          Show recent GE execution events"
 
 test:
 	$(PY) -m pytest -q
@@ -155,19 +164,25 @@ ops-history:
 
 glue-crawler-start:
 	@set -eu; \
-	CRAWLER=$$(terraform -chdir=$(TF_DIR) output -raw glue_crawler_name); \
+	CRAWLER=$$(terraform -chdir=$(TF_DIR) output -raw glue_crawler_name 2>/dev/null || true); \
+	if [ -z "$$CRAWLER" ] || [ "$$CRAWLER" = "null" ]; then \
+		echo "glue_crawler_name output is empty. Enable Glue crawler (glue_enabled=true) and re-apply."; exit 1; \
+	fi; \
 	aws glue start-crawler --region $(AWS_REGION) --name "$$CRAWLER"; \
 	echo "Started crawler $$CRAWLER"
 
 glue-crawler-status:
 	@set -eu; \
-	CRAWLER=$$(terraform -chdir=$(TF_DIR) output -raw glue_crawler_name); \
+	CRAWLER=$$(terraform -chdir=$(TF_DIR) output -raw glue_crawler_name 2>/dev/null || true); \
+	if [ -z "$$CRAWLER" ] || [ "$$CRAWLER" = "null" ]; then \
+		echo "glue_crawler_name output is empty. Enable Glue crawler (glue_enabled=true) and re-apply."; exit 1; \
+	fi; \
 	aws glue get-crawler --region $(AWS_REGION) --name "$$CRAWLER" --query 'Crawler.{Name:Name,State:State,LastCrawl:LastCrawl.Status}' --output json
 
 glue-job-start:
 	@set -eu; \
-	JOB=$$(terraform -chdir=$(TF_DIR) output -raw glue_job_name); \
-	if [ -z "$$JOB" ]; then \
+	JOB=$$(terraform -chdir=$(TF_DIR) output -raw glue_job_name 2>/dev/null || true); \
+	if [ -z "$$JOB" ] || [ "$$JOB" = "null" ]; then \
 		echo "glue_job_name output is empty. Enable the job first (glue_job_enabled=true) and re-apply."; exit 1; \
 	fi; \
 	SILVER=$$(terraform -chdir=$(TF_DIR) output -raw silver_bucket); \
@@ -183,8 +198,8 @@ glue-job-start:
 
 glue-job-status:
 	@set -eu; \
-	JOB=$$(terraform -chdir=$(TF_DIR) output -raw glue_job_name); \
-	if [ -z "$$JOB" ]; then \
+	JOB=$$(terraform -chdir=$(TF_DIR) output -raw glue_job_name 2>/dev/null || true); \
+	if [ -z "$$JOB" ] || [ "$$JOB" = "null" ]; then \
 		echo "glue_job_name output is empty. Enable the job first (glue_job_enabled=true) and re-apply."; exit 1; \
 	fi; \
 	if [ ! -f "$(GLUE_LAST_JOB_RUN_FILE)" ]; then \
@@ -193,3 +208,45 @@ glue-job-status:
 	RUN_ID=$$(cat "$(GLUE_LAST_JOB_RUN_FILE)"); \
 	aws glue get-job-run --region $(AWS_REGION) --job-name "$$JOB" --run-id "$$RUN_ID" \
 	  --query 'JobRun.{Id:Id,JobName:JobName,JobRunState:JobRunState,StartedOn:StartedOn,CompletedOn:CompletedOn,ErrorMessage:ErrorMessage}' --output json
+
+ge-start:
+	@set -eu; \
+	SM_ARN=$$(terraform -chdir=$(TF_DIR) output -raw ge_state_machine_arn 2>/dev/null || true); \
+	if [ -z "$$SM_ARN" ] || [ "$$SM_ARN" = "null" ]; then \
+		echo "ge_state_machine_arn output is empty. Enable GE workflow (ge_enabled=true, ge_workflow_enabled=true) and re-apply."; exit 1; \
+	fi; \
+	SILVER=$$(terraform -chdir=$(TF_DIR) output -raw silver_bucket); \
+	INPUT=$$(SILVER="$$SILVER" GE_SILVER_PREFIX="$(GE_SILVER_PREFIX)" GE_RECORD_TYPE="$(GE_RECORD_TYPE)" GE_DT="$(GE_DT)" GE_RESULT_PREFIX="$(GE_RESULT_PREFIX)" \
+	$(PY) -c 'import json, os; print(json.dumps({ \
+	"silver_bucket": os.environ["SILVER"], \
+	"silver_prefix": os.environ["GE_SILVER_PREFIX"], \
+	"record_type": os.environ["GE_RECORD_TYPE"], \
+	"dt": os.environ["GE_DT"], \
+	"result_prefix": os.environ["GE_RESULT_PREFIX"], \
+	}, separators=(",", ":")))'); \
+	TMP=$$(mktemp); \
+	aws stepfunctions start-execution --region $(AWS_REGION) --state-machine-arn "$$SM_ARN" --input "$$INPUT" > "$$TMP"; \
+	cat "$$TMP"; \
+	$(PY) -c 'import json, sys; print(json.load(sys.stdin)["executionArn"])' < "$$TMP" > "$(GE_LAST_EXEC_FILE)"; \
+	rm -f "$$TMP"; \
+	echo "Saved executionArn to $(GE_LAST_EXEC_FILE)"
+
+ge-status:
+	@set -eu; \
+	EXEC_ARN="$(EXEC_ARN)"; \
+	if [ -z "$$EXEC_ARN" ]; then \
+		if [ -f "$(GE_LAST_EXEC_FILE)" ]; then EXEC_ARN=$$(cat "$(GE_LAST_EXEC_FILE)"); else \
+			echo "Missing EXEC_ARN. Run 'make ge-start' or pass EXEC_ARN=arn:aws:states:..."; exit 1; \
+		fi; \
+	fi; \
+	aws stepfunctions describe-execution --region $(AWS_REGION) --execution-arn "$$EXEC_ARN"
+
+ge-history:
+	@set -eu; \
+	EXEC_ARN="$(EXEC_ARN)"; \
+	if [ -z "$$EXEC_ARN" ]; then \
+		if [ -f "$(GE_LAST_EXEC_FILE)" ]; then EXEC_ARN=$$(cat "$(GE_LAST_EXEC_FILE)"); else \
+			echo "Missing EXEC_ARN. Run 'make ge-start' or pass EXEC_ARN=arn:aws:states:..."; exit 1; \
+		fi; \
+	fi; \
+	aws stepfunctions get-execution-history --region $(AWS_REGION) --execution-arn "$$EXEC_ARN" --reverse-order --max-results 30

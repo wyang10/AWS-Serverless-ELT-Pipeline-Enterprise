@@ -18,6 +18,11 @@ variable "idempotency_table_arn" {
   type = string
 }
 
+variable "eventbridge_put_events_enabled" {
+  type    = bool
+  default = false
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
@@ -98,6 +103,14 @@ data "aws_iam_policy_document" "transform" {
   statement {
     actions   = ["s3:PutObject", "s3:AbortMultipartUpload", "s3:ListBucketMultipartUploads"]
     resources = ["${var.silver_bucket_arn}/*"]
+  }
+
+  dynamic "statement" {
+    for_each = var.eventbridge_put_events_enabled ? [1] : []
+    content {
+      actions   = ["events:PutEvents"]
+      resources = ["*"]
+    }
   }
 }
 

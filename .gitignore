@@ -20,3 +20,4 @@ infra/terraform/envs/**/**.auto.tfvars.json
 # Local convenience (last Step Functions executionArn)
 .last_ops_execution
 .last_glue_job_run
+.last_ge_execution

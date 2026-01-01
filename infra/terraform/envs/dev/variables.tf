@@ -162,6 +162,80 @@ variable "glue_job_script_key" {
   default = "glue/scripts/compact_silver.py"
 }
 
+variable "ge_enabled" {
+  type    = bool
+  default = false
+}
+
+variable "ge_job_name" {
+  type        = string
+  default     = null
+  description = "Glue job name for GE validation. If null, a name derived from project will be used."
+}
+
+variable "ge_job_script_key" {
+  type    = string
+  default = "glue/scripts/ge_validate_silver.py"
+}
+
+variable "ge_additional_python_modules" {
+  type    = string
+  default = "great-expectations==0.18.21"
+}
+
+variable "ge_workflow_enabled" {
+  type    = bool
+  default = false
+}
+
+variable "ge_workflow_id" {
+  type    = string
+  default = "ge-quality-gate"
+}
+
+variable "ge_eventbridge_enabled" {
+  type    = bool
+  default = false
+}
+
+variable "ge_event_source" {
+  type    = string
+  default = "serverless-elt.transform"
+}
+
+variable "ge_event_detail_type" {
+  type    = string
+  default = "silver_partition_ready"
+}
+
+variable "ge_emit_events_from_transform" {
+  type    = bool
+  default = false
+}
+
+variable "ge_event_bus_name" {
+  type    = string
+  default = "default"
+}
+
+variable "ge_notification_topic_arn" {
+  type        = string
+  default     = null
+  description = "Optional SNS topic ARN for GE gate failures (falls back to alarm_notification_topic_arn if null)."
+}
+
+variable "ge_quarantine_enabled" {
+  type        = bool
+  default     = false
+  description = "If true, the GE gate writes a failure marker under ge_quarantine_prefix."
+}
+
+variable "ge_quarantine_prefix" {
+  type        = string
+  default     = "silver/_quarantine/ge"
+  description = "S3 prefix (within silver bucket) to write GE failure markers."
+}
+
 variable "bucket_suffix" {
   type    = string
   default = ""

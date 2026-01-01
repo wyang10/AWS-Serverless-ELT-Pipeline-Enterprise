@@ -57,3 +57,23 @@ output "glue_job_role_arn" {
 output "glue_job_script_s3_uri" {
   value = length(module.glue_catalog) > 0 ? module.glue_catalog[0].job_script_s3_uri : null
 }
+
+output "ge_job_name" {
+  value = length(module.ge_job) > 0 ? module.ge_job[0].job_name : null
+}
+
+output "ge_job_role_arn" {
+  value = length(module.ge_job) > 0 ? module.ge_job[0].job_role_arn : null
+}
+
+output "ge_job_script_s3_uri" {
+  value = length(module.ge_job) > 0 ? module.ge_job[0].script_s3_uri : null
+}
+
+output "ge_state_machine" {
+  value = length(module.ge_workflow) > 0 ? module.ge_workflow[0].state_machine_name : null
+}
+
+output "ge_state_machine_arn" {
+  value = length(module.ge_workflow) > 0 ? module.ge_workflow[0].state_machine_arn : null
+}
