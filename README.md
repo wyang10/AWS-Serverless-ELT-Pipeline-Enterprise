@@ -85,6 +85,119 @@ repo-root/
 - AWS credentials for a **dev** account (or a sandbox account)
 - Optional: Docker (only if you prefer containerized builds)
 
+## 从零开始（安装/部署指引）
+
+下面是一套“从新 clone → 部署 → 造数 → 验证”的完整命令清单（默认区域 `us-east-2`）。
+
+### 0) Clone 代码
+
+```bash
+git clone https://github.com/wyang10/AWS-Serverless-ELT-Pipeline-Enterprise.git
+cd AWS-Serverless-ELT-Pipeline-Enterprise
+
+# 可选：切到 v2.0 tag（更适合简历/里程碑展示）
+git checkout v2.0
+```
+
+### 1) Python 虚拟环境 + 依赖
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -r requirements-dev.txt
+```
+
+### 2) AWS 凭证/区域确认
+
+```bash
+# 可选：如果你用的是 profile
+export AWS_PROFILE=<your-profile>
+
+# 建议固定 region（Terraform/AWS CLI 都会用到）
+export AWS_REGION=us-east-2
+export AWS_DEFAULT_REGION=us-east-2
+
+aws sts get-caller-identity
+```
+
+### 3) 本地单测（可选但推荐）
+
+```bash
+make test
+```
+
+### 4) 构建 Lambda 打包产物（build/*.zip）
+
+```bash
+make build
+```
+
+### 5) Terraform 初始化 + 部署
+
+```bash
+make tf-init
+TF_AUTO_APPROVE=1 make tf-apply
+```
+
+如果你遇到 `sqs:ListQueueTags` 的 403（有些账号禁止读 tags），用下面“无 tag API”的方式绕过：
+
+```bash
+# 1) 先在 AWS 里创建队列 + DLQ，并把 URL/ARN 写到 auto tfvars（Terraform 会自动读取）
+python3 scripts/create_sqs_queue.py \
+  --name serverless-elt-<suffix>-events \
+  --with-dlq \
+  --region us-east-2 \
+  --out infra/terraform/envs/dev/queue.auto.tfvars.json
+
+# 2) 如果之前 Terraform 已经把 queue 资源写入 state，需要移除对应条目（避免 refresh 再触发 ListQueueTags）
+terraform -chdir=infra/terraform/envs/dev state list | rg '^module\\.queue' || true
+terraform -chdir=infra/terraform/envs/dev state rm 'module.queue[0].aws_sqs_queue.dlq[0]' || true
+
+# 3) 再次 apply
+TF_AUTO_APPROVE=1 make tf-apply
+```
+
+### 6) 造数并上传到 Bronze（触发整条管道）
+
+```bash
+BRONZE=$(terraform -chdir=infra/terraform/envs/dev output -raw bronze_bucket)
+
+python3 scripts/gen_fake_events.py --type shipments --count 50 --format jsonl --out /tmp/shipments.jsonl
+aws s3 cp /tmp/shipments.jsonl \
+  "s3://$BRONZE/bronze/shipments/manual/shipments-$(date -u +%Y%m%dT%H%M%SZ).jsonl" \
+  --region us-east-2
+```
+
+### 7) 验证 Silver 产出 Parquet
+
+```bash
+SILVER=$(terraform -chdir=infra/terraform/envs/dev output -raw silver_bucket)
+aws s3 ls "s3://$SILVER/silver/shipments/" --recursive --region us-east-2 | tail
+```
+
+### 8) v2 “企业化”能力（按需）
+
+```bash
+# Ops Step Functions（回灌/巡检编排）
+make ops-start
+make ops-status
+make ops-history
+
+# Glue Crawler（让 Athena 有表）
+make glue-crawler-start
+make glue-crawler-status
+
+# Glue Compaction Job（小文件压缩/按天重跑，输出到安全前缀）
+make glue-job-start GLUE_RECORD_TYPE=shipments GLUE_DT=2025-12-31 GLUE_OUTPUT_PREFIX=silver_compacted
+make glue-job-status
+
+# GE Quality Gate（Glue Job + Step Functions 闸门）
+make ge-start GE_RECORD_TYPE=shipments GE_DT=2025-12-31 GE_RESULT_PREFIX=ge/results
+make ge-status
+make ge-history
+```
+
 ## Quickstart (dev)
 
 1) Build Lambda zips:
