@@ -25,6 +25,12 @@ variable "workflow_id" {
   description = "Short identifier used in resource names (e.g., ops-replay-and-quality-gate)."
 }
 
+variable "iam_name_prefix" {
+  type        = string
+  default     = null
+  description = "Optional IAM role name prefix override (helps satisfy org naming policies)."
+}
+
 variable "schedule_enabled" {
   type    = bool
   default = false
@@ -45,6 +51,10 @@ variable "tags" {
   default = {}
 }
 
+locals {
+  iam_prefix = var.iam_name_prefix != null && var.iam_name_prefix != "" ? var.iam_name_prefix : var.name_prefix
+}
+
 data "aws_iam_policy_document" "assume_sfn" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -57,9 +67,9 @@ data "aws_iam_policy_document" "assume_sfn" {
 
 resource "aws_iam_role" "sfn" {
   count              = var.enabled ? 1 : 0
-  name               = "${var.name_prefix}-${var.workflow_id}-sfn"
+  name               = "${local.iam_prefix}-${var.workflow_id}-sfn"
   assume_role_policy = data.aws_iam_policy_document.assume_sfn.json
-  tags               = var.tags
+  tags               = {}
 }
 
 data "aws_iam_policy_document" "sfn" {
@@ -71,7 +81,7 @@ data "aws_iam_policy_document" "sfn" {
 
 resource "aws_iam_role_policy" "sfn" {
   count  = var.enabled ? 1 : 0
-  name   = "${var.name_prefix}-${var.workflow_id}-sfn"
+  name   = "${local.iam_prefix}-${var.workflow_id}-sfn"
   role   = aws_iam_role.sfn[0].id
   policy = data.aws_iam_policy_document.sfn.json
 }
@@ -194,9 +204,9 @@ data "aws_iam_policy_document" "assume_events" {
 
 resource "aws_iam_role" "events" {
   count              = var.enabled && var.schedule_enabled ? 1 : 0
-  name               = "${var.name_prefix}-${var.workflow_id}-events"
+  name               = "${local.iam_prefix}-${var.workflow_id}-events"
   assume_role_policy = data.aws_iam_policy_document.assume_events.json
-  tags               = var.tags
+  tags               = {}
 }
 
 data "aws_iam_policy_document" "events" {
@@ -208,7 +218,7 @@ data "aws_iam_policy_document" "events" {
 
 resource "aws_iam_role_policy" "events" {
   count  = var.enabled && var.schedule_enabled ? 1 : 0
-  name   = "${var.name_prefix}-${var.workflow_id}-events"
+  name   = "${local.iam_prefix}-${var.workflow_id}-events"
   role   = aws_iam_role.events[0].id
   policy = data.aws_iam_policy_document.events.json
 }
