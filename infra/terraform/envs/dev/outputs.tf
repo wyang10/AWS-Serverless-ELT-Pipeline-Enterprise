@@ -6,6 +6,14 @@ output "silver_bucket" {
   value = module.silver_bucket.name
 }
 
+output "idempotency_table_name" {
+  value = module.idempotency_table.name
+}
+
+output "idempotency_table_arn" {
+  value = module.idempotency_table.arn
+}
+
 output "queue_url" {
   value = local.queue_url
 }

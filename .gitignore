@@ -21,3 +21,4 @@ infra/terraform/envs/**/**.auto.tfvars.json
 .last_ops_execution
 .last_glue_job_run
 .last_ge_execution
+.last_e2e_seed.json

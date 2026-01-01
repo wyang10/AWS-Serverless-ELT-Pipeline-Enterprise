@@ -1,4 +1,7 @@
-.PHONY: help test build build-ingest build-transform build-ops-replay build-ops-quality clean tf-init tf-plan tf-apply tf-destroy ops-start ops-status ops-history glue-crawler-start glue-crawler-status glue-job-start glue-job-status ge-start ge-status ge-history
+.PHONY: help test build build-ingest build-transform build-ops-replay build-ops-quality clean tf-init tf-plan tf-apply tf-destroy \
+	ops-start ops-status ops-history glue-crawler-start glue-crawler-status glue-job-start glue-job-status ge-start ge-status ge-history \
+	verify-whoami verify-tf-outputs verify-s3-notifications verify-lambdas verify-ddb verify-sqs verify-seed verify-silver verify-idempotency \
+	verify-glue verify-ge verify-observability verify-e2e profile-audrey-tf
 
 PY ?= python3
 TF_DIR ?= infra/terraform/envs/dev
@@ -28,6 +31,13 @@ GE_SILVER_PREFIX ?= silver
 GE_RESULT_PREFIX ?= ge/results
 GE_LAST_EXEC_FILE ?= .last_ge_execution
 
+E2E_LAST_SEED_FILE ?= .last_e2e_seed.json
+E2E_SEED_PREFIX ?= bronze/shipments/manual/e2e
+E2E_IDEMPOTENCY_PREFIX ?= tmp/e2e-idempotency
+VERIFY_SLEEP_SECONDS ?= 15
+VERIFY_MAX_ATTEMPTS ?= 20
+VERIFY_WINDOW_MINUTES ?= 30
+
 help:
 	@echo "Targets:"
 	@echo "  test          Run unit tests"
@@ -46,6 +56,8 @@ help:
 	@echo "  ge-start            Start GE quality gate state machine"
 	@echo "  ge-status           Show GE execution status (EXEC_ARN=... optional)"
 	@echo "  ge-history          Show recent GE execution events"
+	@echo "  verify-e2e          Run screenshot-able E2E checks"
+	@echo "  profile-audrey-tf   Create/update local AWS profile alias (audrey-tf)"
 
 test:
 	$(PY) -m pytest -q
@@ -250,3 +262,118 @@ ge-history:
 		fi; \
 	fi; \
 	aws stepfunctions get-execution-history --region $(AWS_REGION) --execution-arn "$$EXEC_ARN" --reverse-order --max-results 30
+
+profile-audrey-tf:
+	@set -eu; \
+	$(PY) scripts/setup_profile_alias.py --profile audrey-tf --from default --region $(AWS_REGION) >/dev/null
+	@echo "OK: created/updated AWS profile 'audrey-tf' (region $(AWS_REGION))."
+
+verify-whoami:
+	@set -eu; \
+	echo "AWS_PROFILE=$${AWS_PROFILE:-<default>} AWS_REGION=$(AWS_REGION)"; \
+	if [ -n "$${AWS_PROFILE:-}" ]; then \
+		if ! aws configure list-profiles | tr -d '\r' | grep -qx "$$AWS_PROFILE"; then \
+			echo "AWS profile '$$AWS_PROFILE' not found. Run 'make profile-audrey-tf' or set AWS_PROFILE=818466672474."; exit 1; \
+		fi; \
+	fi; \
+	aws sts get-caller-identity --region $(AWS_REGION)
+
+verify-tf-outputs:
+	@set -eu; \
+	terraform -chdir=$(TF_DIR) output
+
+verify-s3-notifications:
+	@set -eu; \
+	BRONZE=$$(terraform -chdir=$(TF_DIR) output -raw bronze_bucket); \
+	aws s3api get-bucket-notification-configuration --bucket "$$BRONZE" --region $(AWS_REGION) \
+	  --query 'LambdaFunctionConfigurations[].{Arn:LambdaFunctionArn,Events:Events,Prefix:Filter.Key.FilterRules[?Name==`prefix`].Value|[0]}' --output table
+
+verify-lambdas:
+	@set -eu; \
+	LAMBDA_INGEST=$$(terraform -chdir=$(TF_DIR) output -raw ingest_lambda); \
+	LAMBDA_TRANSFORM=$$(terraform -chdir=$(TF_DIR) output -raw transform_lambda); \
+	aws lambda get-function --function-name "$$LAMBDA_INGEST" --region $(AWS_REGION) >/dev/null && echo "OK ingest=$$LAMBDA_INGEST"; \
+	aws lambda get-function --function-name "$$LAMBDA_TRANSFORM" --region $(AWS_REGION) >/dev/null && echo "OK transform=$$LAMBDA_TRANSFORM"; \
+	echo "LogGroups: /aws/lambda/$$LAMBDA_INGEST  /aws/lambda/$$LAMBDA_TRANSFORM"
+
+verify-ddb:
+	@set -eu; \
+	DDB=$$(terraform -chdir=$(TF_DIR) output -raw idempotency_table_name 2>/dev/null || true); \
+	if [ -z "$$DDB" ] || [ "$$DDB" = "null" ]; then \
+		DDB=$$(terraform -chdir=$(TF_DIR) state show module.idempotency_table.aws_dynamodb_table.this | awk -F' = ' '/^[[:space:]]*name[[:space:]]+=/{gsub(/"/,"",$$2);print $$2; exit}'); \
+	fi; \
+	if [ -z "$$DDB" ]; then echo "Could not determine DynamoDB table name. Run TF apply first."; exit 1; fi; \
+	echo "$$DDB"; \
+	aws dynamodb describe-time-to-live --table-name "$$DDB" --region $(AWS_REGION); \
+	aws dynamodb scan --table-name "$$DDB" --max-items 5 --region $(AWS_REGION)
+
+verify-sqs:
+	@set -eu; \
+	SQS_URL=$$(terraform -chdir=$(TF_DIR) output -raw queue_url); \
+	DLQ_URL=$$(terraform -chdir=$(TF_DIR) output -raw dlq_url); \
+	aws sqs get-queue-attributes --queue-url "$$SQS_URL" --attribute-names ApproximateNumberOfMessages ApproximateNumberOfMessagesNotVisible ApproximateNumberOfMessagesDelayed --region $(AWS_REGION); \
+	aws sqs get-queue-attributes --queue-url "$$DLQ_URL" --attribute-names ApproximateNumberOfMessages --region $(AWS_REGION)
+
+verify-seed:
+	@set -eu; \
+	BRONZE=$$(terraform -chdir=$(TF_DIR) output -raw bronze_bucket); \
+	TS=$$(date -u +%Y%m%dT%H%M%SZ); \
+	KEY="$(E2E_SEED_PREFIX)/shipments_$$TS.jsonl"; \
+	$(PY) scripts/gen_fake_events.py --type shipments --count 50 --format jsonl --out /tmp/shipments_e2e.jsonl; \
+	aws s3 cp /tmp/shipments_e2e.jsonl "s3://$$BRONZE/$$KEY" --region $(AWS_REGION); \
+	ETAG=$$(aws s3api head-object --bucket "$$BRONZE" --key "$$KEY" --query ETag --output text --region $(AWS_REGION) | tr -d '\"'); \
+	BRONZE="$$BRONZE" KEY="$$KEY" ETAG="$$ETAG" OUT="$(E2E_LAST_SEED_FILE)" \
+	$(PY) -c 'import json, os, pathlib; p=pathlib.Path(os.environ["OUT"]); p.write_text(json.dumps({"bronze_bucket":os.environ["BRONZE"],"key":os.environ["KEY"],"etag":os.environ["ETAG"]}, indent=2)+"\\n")'; \
+	echo "Saved $(E2E_LAST_SEED_FILE): s3://$$BRONZE/$$KEY"
+
+verify-silver:
+	@set -eu; \
+	SILVER=$$(terraform -chdir=$(TF_DIR) output -raw silver_bucket); \
+	$(PY) scripts/check_recent_s3_objects.py \
+	  --bucket "$$SILVER" \
+	  --prefix "silver/shipments/" \
+	  --suffix ".parquet" \
+	  --region "$(AWS_REGION)" \
+	  --window-minutes "$(VERIFY_WINDOW_MINUTES)" \
+	  --sleep-seconds "$(VERIFY_SLEEP_SECONDS)" \
+	  --max-attempts "$(VERIFY_MAX_ATTEMPTS)"
+
+verify-idempotency:
+	@set -eu; \
+	LAMBDA_INGEST=$$(terraform -chdir=$(TF_DIR) output -raw ingest_lambda); \
+	BRONZE=$$(terraform -chdir=$(TF_DIR) output -raw bronze_bucket); \
+	TS=$$(date -u +%Y%m%dT%H%M%SZ); \
+	KEY="$(E2E_IDEMPOTENCY_PREFIX)/idempotency_$$TS.jsonl"; \
+	echo '{"record_type":"shipments","event_time":"'$$(date -u +%Y-%m-%dT%H:%M:%SZ)'","shipment_id":"e2e_idempotency","origin":"SZX","destination":"SEA","carrier":"UPS","weight_kg":1.0}' > /tmp/idempotency.jsonl; \
+	aws s3 cp /tmp/idempotency.jsonl "s3://$$BRONZE/$$KEY" --region $(AWS_REGION); \
+	ETAG=$$(aws s3api head-object --bucket "$$BRONZE" --key "$$KEY" --query ETag --output text --region $(AWS_REGION) | tr -d '\"'); \
+	printf '{"Records":[{"s3":{"bucket":{"name":"%s"},"object":{"key":"%s","eTag":"%s"}}}]}\n' "$$BRONZE" "$$KEY" "$$ETAG" > /tmp/ingest_event.json; \
+	aws lambda invoke --function-name "$$LAMBDA_INGEST" --region $(AWS_REGION) --cli-binary-format raw-in-base64-out --payload file:///tmp/ingest_event.json /tmp/ingest_out_1.json >/dev/null; \
+	aws lambda invoke --function-name "$$LAMBDA_INGEST" --region $(AWS_REGION) --cli-binary-format raw-in-base64-out --payload file:///tmp/ingest_event.json /tmp/ingest_out_2.json >/dev/null; \
+	echo "first:"; cat /tmp/ingest_out_1.json; echo; \
+	echo "second:"; cat /tmp/ingest_out_2.json; echo; \
+	$(PY) -c 'import json; o=json.load(open("/tmp/ingest_out_2.json")); skipped=int(o.get("skipped",0)); raise SystemExit(0 if skipped>=1 else 1)' \
+	&& echo "OK: second invoke skipped (idempotent)" || (echo "FAIL: expected skipped>=1 on second invoke"; exit 1)
+
+verify-glue:
+	@set -eu; \
+	CRAWLER=$$(terraform -chdir=$(TF_DIR) output -raw glue_crawler_name 2>/dev/null || true); \
+	DB=$$(terraform -chdir=$(TF_DIR) output -raw glue_database_name 2>/dev/null || true); \
+	if [ -z "$$CRAWLER" ] || [ "$$CRAWLER" = "null" ]; then echo "Glue not enabled (glue_enabled=true)."; exit 1; fi; \
+	aws glue get-crawler --region $(AWS_REGION) --name "$$CRAWLER" --query 'Crawler.{Name:Name,State:State,LastCrawl:LastCrawl.Status}' --output json; \
+	echo "database=$$DB"
+
+verify-ge:
+	@set -eu; \
+	SM_ARN=$$(terraform -chdir=$(TF_DIR) output -raw ge_state_machine_arn 2>/dev/null || true); \
+	if [ -z "$$SM_ARN" ] || [ "$$SM_ARN" = "null" ]; then echo "GE workflow not enabled (ge_enabled=true, ge_workflow_enabled=true)."; exit 1; fi; \
+	aws stepfunctions list-executions --region $(AWS_REGION) --state-machine-arn "$$SM_ARN" --max-results 5
+
+verify-observability:
+	@set -eu; \
+	DASH=$$(terraform -chdir=$(TF_DIR) output -raw dashboard_name 2>/dev/null || true); \
+	if [ -z "$$DASH" ] || [ "$$DASH" = "null" ]; then echo "Observability disabled or not deployed."; exit 0; fi; \
+	aws cloudwatch get-dashboard --region $(AWS_REGION) --dashboard-name "$$DASH" >/dev/null; \
+	echo "OK dashboard=$$DASH"
+
+verify-e2e: verify-whoami verify-tf-outputs verify-s3-notifications verify-lambdas verify-ddb verify-sqs verify-seed verify-silver verify-idempotency verify-glue verify-ge verify-observability
