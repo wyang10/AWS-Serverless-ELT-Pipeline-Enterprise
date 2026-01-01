@@ -269,7 +269,7 @@ make ge-history
 - 命令：`make verify-sqs`
 - 通过：主队列消息数接近 0；DLQ 为 0。（消息“最老年龄”属于 CloudWatch 指标，不是 SQS attribute）
 - 截图：终端 `get-queue-attributes` 输出； SQS 控制台 Monitoring 图表。
-![](demo/5.png)
+![](demo/5-SQS-DLQ健康.png)
 
 ### 6) 造数触发 E2E（S3 → ingest → SQS → transform → Silver）
 
