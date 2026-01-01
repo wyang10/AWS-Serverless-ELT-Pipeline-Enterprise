@@ -58,10 +58,8 @@ def main() -> int:
     }
     if dlq_url:
         payload["existing_dlq_url"] = dlq_url
-        payload["dlq_url"] = dlq_url
     if dlq_arn:
         payload["existing_dlq_arn"] = dlq_arn
-        payload["dlq_arn"] = dlq_arn
 
     out_f = None
     try:
