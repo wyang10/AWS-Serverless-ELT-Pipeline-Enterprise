@@ -69,6 +69,9 @@ locals {
   scripts_bucket_name = var.scripts_bucket_name != null && var.scripts_bucket_name != "" ? var.scripts_bucket_name : var.silver_bucket_name
 
   job_name = var.job_name != null && var.job_name != "" ? var.job_name : "${local.iam_prefix}-silver-compact"
+
+  schema_delete_behavior = var.recrawl_behavior == "CRAWL_NEW_FOLDERS_ONLY" ? "LOG" : "DEPRECATE_IN_DATABASE"
+  schema_update_behavior = var.recrawl_behavior == "CRAWL_NEW_FOLDERS_ONLY" ? "LOG" : "UPDATE_IN_DATABASE"
 }
 
 resource "aws_glue_catalog_database" "silver" {
@@ -138,8 +141,8 @@ resource "aws_glue_crawler" "silver" {
   }
 
   schema_change_policy {
-    delete_behavior = "DEPRECATE_IN_DATABASE"
-    update_behavior = "UPDATE_IN_DATABASE"
+    delete_behavior = local.schema_delete_behavior
+    update_behavior = local.schema_update_behavior
   }
 }
 
