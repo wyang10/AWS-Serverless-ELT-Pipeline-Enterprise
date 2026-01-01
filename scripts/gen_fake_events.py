@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+"""
+Generate fake events for the Bronze layer.
+
+Examples:
+- JSONL for S3 bronze:
+  `python scripts/gen_fake_events.py --type shipments --count 100 --format jsonl --out /tmp/shipments.jsonl`
+- Pretty JSON array:
+  `python scripts/gen_fake_events.py --type shipments --count 100 --format json --out /tmp/shipments.json`
+"""
+
 import argparse
 import json
 import random

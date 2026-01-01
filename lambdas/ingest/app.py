@@ -1,3 +1,19 @@
+"""
+Ingest Lambda (Bronze → SQS) with object-level idempotency.
+
+Trigger:
+- S3 ObjectCreated events for Bronze JSON/JSONL objects.
+
+What it does:
+- Uses DynamoDB as a lightweight lock/idempotency table keyed by `s3://bucket/key#etag`.
+- Reads the object, parses JSONL/JSON, normalizes records, and publishes to SQS in batches.
+
+Environment variables:
+- `QUEUE_URL` (required): Destination SQS queue URL.
+- `IDEMPOTENCY_TABLE` (required): DynamoDB table name for object locks.
+- `LOCK_SECONDS` (optional): Lock TTL to avoid duplicate ingestion during retries.
+"""
+
 from typing import Any, Dict, List, Optional
 
 import boto3
@@ -111,6 +127,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     log("ingest_start", objects=len(objects))
     for bucket, key, etag in objects:
+        # Idempotency scope is the *S3 object version* (bucket/key + etag), not per record.
         pk = _object_id(bucket, key, etag)
         if not _acquire_object_lock(ddb, table_name, pk, lock_seconds=lock_seconds):
             skipped += 1
@@ -118,6 +135,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             continue
 
         try:
+            # Read the source object, parse JSONL lines, and normalize into a canonical schema.
             text = _read_s3_text(s3, bucket, key)
             records: List[Dict[str, Any]] = []
             for line_no, obj in enumerate(iter_json_records(text), start=1):
@@ -130,11 +148,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 records.append(normalized)
 
             total_records += len(records)
+            # Batch send to SQS (max 10 entries per batch).
             enq = _enqueue_records(sqs, queue_url, records)
             total_enqueued += enq
             _mark_processed(ddb, table_name, pk)
             log("ingest_object_done", pk=pk, records=len(records), enqueued=enq)
         except Exception as e:
+            # Mark error and re-raise so the invocation is considered failed (visible in logs/metrics).
             _mark_error(ddb, table_name, pk, reason=str(e))
             log("ingest_object_error", pk=pk, error=str(e))
             raise

@@ -1,3 +1,17 @@
+"""
+Step Functions task: replay/backfill by copying S3 objects within the Bronze bucket.
+
+Why copy instead of publishing to SQS directly?
+- It reuses the normal S3 → ingest path (idempotency, parsing, retries).
+- It can be run with limited IAM permissions (no need for `sqs:SendMessage`).
+
+Inputs (from Step Functions execution input):
+- `bronze_bucket` (required)
+- `src_prefix` (required): source prefix to scan (e.g., "bronze/shipments/")
+- `dest_prefix_base` (optional): must start with "bronze/" to trigger ingest
+- `window_hours` (optional) OR explicit `start` / `end` (ISO-8601)
+"""
+
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
@@ -61,6 +75,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if not (start <= last_modified <= end):
                 continue
 
+            # Copy to a new key under dest_prefix, so S3 notifications re-trigger ingest.
             src_key = obj["Key"]
             dst_key = dest_prefix.rstrip("/") + "/" + src_key
             s3.copy_object(

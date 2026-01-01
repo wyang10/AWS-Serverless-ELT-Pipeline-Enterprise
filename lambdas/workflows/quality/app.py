@@ -1,3 +1,18 @@
+"""
+Step Functions task: lightweight “quality probe” for Silver outputs.
+
+This is intentionally simple/cheap:
+- It checks whether at least N Parquet objects exist under `silver/<record_type>/`
+  with `LastModified >= since`.
+
+Inputs (from Step Functions execution input):
+- `silver_bucket` (required)
+- `silver_prefix` (optional, default "silver")
+- `record_type` (optional, default "shipments")
+- `since` (required) OR `execution_start_time` (set by the workflow)
+- `min_parquet_objects` (optional, default 1)
+"""
+
 from datetime import datetime, timezone
 from typing import Any, Dict
 

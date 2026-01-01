@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+"""
+Replay/backfill by reading Bronze objects and publishing each record to SQS.
+
+Use this when you *want* to bypass the S3 → ingest path and push directly to the queue.
+It requires your IAM principal to have `sqs:SendMessage` on the destination queue.
+
+Example:
+`python scripts/replay_from_s3.py --bucket <bronze_bucket> --prefix bronze/shipments/ --queue-url <queue_url> --start 2026-01-01T00:00:00Z --end 2026-01-02T00:00:00Z`
+"""
+
 import argparse
 import json
 from datetime import datetime, timezone
@@ -58,4 +68,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

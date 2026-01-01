@@ -1,3 +1,25 @@
+"""
+Transform Lambda (SQS → Silver Parquet).
+
+Trigger:
+- SQS event source mapping, with partial batch failure reporting enabled.
+
+What it does:
+- Parses each SQS message into a normalized record (shared schema).
+- Groups records by `(record_type, dt)` and writes Parquet objects to Silver S3.
+- Returns `batchItemFailures` so poisoned messages can be retried / sent to DLQ.
+
+Optional (enterprise-ish):
+- When `QUALITY_EVENTBRIDGE_ENABLED=true`, emits an EventBridge event per partition written
+  to trigger a downstream quality gate (e.g., Step Functions + Glue GE job).
+
+Environment variables:
+- `SILVER_BUCKET` (required), `SILVER_PREFIX` (default: "silver")
+- `MAX_RECORDS_PER_FILE` (default: 5000)
+- `QUALITY_EVENTBRIDGE_ENABLED` (default: false)
+- `QUALITY_EVENTBUS_NAME` (default: "default"), `QUALITY_EVENT_SOURCE`, `QUALITY_EVENT_DETAIL_TYPE`
+"""
+
 import io
 import json
 from datetime import datetime, timezone
@@ -38,6 +60,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     records = event.get("Records", [])
     failures: List[Dict[str, str]] = []
 
+    # Parse + normalize messages. Bad messages become partial failures (retries/DLQ).
     good: List[Tuple[str, Dict[str, Any], str]] = []
     for r in records:
         msg_id = r.get("messageId") or r.get("messageID") or ""
@@ -57,6 +80,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         dt = partition_dt([rec])
         grouped.setdefault((record_type, dt), []).append((msg_id, rec))
 
+    # Write Parquet objects by partition, chunked to keep files reasonably sized.
     written_files = 0
     partitions_written: Dict[Tuple[str, str], int] = {}
     for (record_type, dt), items in grouped.items():
@@ -72,6 +96,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 log("transform_write_error", record_type=record_type, dt=dt, error=str(e))
                 failures.extend({"itemIdentifier": msg_id} for msg_id, _ in items_chunk if msg_id)
 
+    # Optional: notify downstream orchestration that a partition is ready for quality validation.
     if events and partitions_written:
         try:
             now = datetime.now(timezone.utc)
