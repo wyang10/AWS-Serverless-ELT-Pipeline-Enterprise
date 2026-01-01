@@ -1,10 +1,20 @@
-.PHONY: help test build build-ingest build-transform build-ops-replay build-ops-quality clean tf-init tf-plan tf-apply tf-destroy
+.PHONY: help test build build-ingest build-transform build-ops-replay build-ops-quality clean tf-init tf-plan tf-apply tf-destroy ops-start ops-status ops-history
 
 PY ?= python3
 TF_DIR ?= infra/terraform/envs/dev
 BUILD_DIR ?= build
 TF_BACKEND_CONFIG ?=
 TF_AUTO_APPROVE ?= 0
+AWS_REGION ?= us-east-2
+
+OPS_SRC_PREFIX ?= bronze/shipments/manual/
+OPS_DEST_PREFIX_BASE ?= bronze/replay/manual
+OPS_WINDOW_HOURS ?= 24
+OPS_RECORD_TYPE ?= shipments
+OPS_MIN_PARQUET_OBJECTS ?= 1
+OPS_POLL_INTERVAL_SECONDS ?= 30
+OPS_MAX_ATTEMPTS ?= 20
+OPS_LAST_EXEC_FILE ?= .last_ops_execution
 
 help:
 	@echo "Targets:"
@@ -14,6 +24,9 @@ help:
 	@echo "  tf-plan       terraform plan (dev env)"
 	@echo "  tf-apply      terraform apply (dev env)"
 	@echo "  tf-destroy    terraform destroy (dev env)"
+	@echo "  ops-start     Start Step Functions ops workflow (writes $(OPS_LAST_EXEC_FILE))"
+	@echo "  ops-status    Show Step Functions execution status (EXEC_ARN=... optional)"
+	@echo "  ops-history   Show recent execution events (EXEC_ARN=... optional)"
 
 test:
 	$(PY) -m pytest -q
@@ -80,3 +93,52 @@ tf-apply:
 
 tf-destroy:
 	cd $(TF_DIR) && terraform destroy $(if $(filter 1,$(TF_AUTO_APPROVE)),-auto-approve,) -var-file=dev.tfvars
+
+ops-start:
+	@set -eu; \
+	SM_ARN=$$(terraform -chdir=$(TF_DIR) output -raw ops_state_machine_arn); \
+	BRONZE=$$(terraform -chdir=$(TF_DIR) output -raw bronze_bucket); \
+	SILVER=$$(terraform -chdir=$(TF_DIR) output -raw silver_bucket); \
+	INPUT=$$(BRONZE="$$BRONZE" SILVER="$$SILVER" \
+	OPS_SRC_PREFIX="$(OPS_SRC_PREFIX)" OPS_DEST_PREFIX_BASE="$(OPS_DEST_PREFIX_BASE)" \
+	OPS_WINDOW_HOURS="$(OPS_WINDOW_HOURS)" OPS_RECORD_TYPE="$(OPS_RECORD_TYPE)" \
+	OPS_MIN_PARQUET_OBJECTS="$(OPS_MIN_PARQUET_OBJECTS)" OPS_POLL_INTERVAL_SECONDS="$(OPS_POLL_INTERVAL_SECONDS)" \
+	OPS_MAX_ATTEMPTS="$(OPS_MAX_ATTEMPTS)" \
+	$(PY) -c 'import json, os; print(json.dumps({ \
+	"bronze_bucket": os.environ["BRONZE"], \
+	"src_prefix": os.environ["OPS_SRC_PREFIX"], \
+	"dest_prefix_base": os.environ["OPS_DEST_PREFIX_BASE"], \
+	"window_hours": int(os.environ["OPS_WINDOW_HOURS"]), \
+	"silver_bucket": os.environ["SILVER"], \
+	"silver_prefix": "silver", \
+	"record_type": os.environ["OPS_RECORD_TYPE"], \
+	"min_parquet_objects": int(os.environ["OPS_MIN_PARQUET_OBJECTS"]), \
+	"poll_interval_seconds": int(os.environ["OPS_POLL_INTERVAL_SECONDS"]), \
+	"max_attempts": int(os.environ["OPS_MAX_ATTEMPTS"]), \
+	}, separators=(",", ":")))'); \
+	TMP=$$(mktemp); \
+	aws stepfunctions start-execution --region $(AWS_REGION) --state-machine-arn "$$SM_ARN" --input "$$INPUT" > "$$TMP"; \
+	cat "$$TMP"; \
+	$(PY) -c 'import json, sys; print(json.load(sys.stdin)["executionArn"])' < "$$TMP" > "$(OPS_LAST_EXEC_FILE)"; \
+	rm -f "$$TMP"; \
+	echo "Saved executionArn to $(OPS_LAST_EXEC_FILE)"
+
+ops-status:
+	@set -eu; \
+	EXEC_ARN="$(EXEC_ARN)"; \
+	if [ -z "$$EXEC_ARN" ]; then \
+		if [ -f "$(OPS_LAST_EXEC_FILE)" ]; then EXEC_ARN=$$(cat "$(OPS_LAST_EXEC_FILE)"); else \
+			echo "Missing EXEC_ARN. Run 'make ops-start' or pass EXEC_ARN=arn:aws:states:..."; exit 1; \
+		fi; \
+	fi; \
+	aws stepfunctions describe-execution --region $(AWS_REGION) --execution-arn "$$EXEC_ARN"
+
+ops-history:
+	@set -eu; \
+	EXEC_ARN="$(EXEC_ARN)"; \
+	if [ -z "$$EXEC_ARN" ]; then \
+		if [ -f "$(OPS_LAST_EXEC_FILE)" ]; then EXEC_ARN=$$(cat "$(OPS_LAST_EXEC_FILE)"); else \
+			echo "Missing EXEC_ARN. Run 'make ops-start' or pass EXEC_ARN=arn:aws:states:..."; exit 1; \
+		fi; \
+	fi; \
+	aws stepfunctions get-execution-history --region $(AWS_REGION) --execution-arn "$$EXEC_ARN" --reverse-order --max-results 30

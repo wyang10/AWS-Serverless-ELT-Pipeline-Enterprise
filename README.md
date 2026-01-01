@@ -128,18 +128,23 @@ To enable in dev:
 
 To start it manually:
 
-- `aws stepfunctions start-execution --region us-east-2 --state-machine-arn $(terraform -chdir=infra/terraform/envs/dev output -raw ops_state_machine_arn) --input '{
-  "bronze_bucket":"<bronze_bucket>",
-  "src_prefix":"bronze/shipments/",
-  "dest_prefix_base":"bronze/replay/manual",
-  "window_hours":24,
-  "silver_bucket":"<silver_bucket>",
-  "silver_prefix":"silver",
-  "record_type":"shipments",
-  "min_parquet_objects":1,
-  "poll_interval_seconds":30,
-  "max_attempts":20
-}'`
+- One-liners:
+  - Start: `make ops-start`
+  - Status: `make ops-status`
+  - History: `make ops-history`
+- Or raw CLI (if you prefer):
+  - `aws stepfunctions start-execution --region us-east-2 --state-machine-arn $(terraform -chdir=infra/terraform/envs/dev output -raw ops_state_machine_arn) --input '{
+    "bronze_bucket":"<bronze_bucket>",
+    "src_prefix":"bronze/shipments/",
+    "dest_prefix_base":"bronze/replay/manual",
+    "window_hours":24,
+    "silver_bucket":"<silver_bucket>",
+    "silver_prefix":"silver",
+    "record_type":"shipments",
+    "min_parquet_objects":1,
+    "poll_interval_seconds":30,
+    "max_attempts":20
+  }'`
 
 ## Notes
 
