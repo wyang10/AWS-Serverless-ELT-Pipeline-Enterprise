@@ -226,7 +226,11 @@ make ge-history
 - `.github/workflows/ci.yml`：`pytest` + `terraform fmt -check`
 - `.github/workflows/terraform-manual.yml`：手动触发的 `plan/apply/destroy`（企业版工作流）
 
-`terraform-manual` 需要在 GitHub Repo Secrets 配置 AWS 凭证（推荐 OIDC）：
+### terraform-manual：先配 Secrets 再运行
+
+路径：GitHub Repo → Settings → Secrets and variables → Actions → New repository secret
+
+`terraform-manual` 需要在 Repo Secrets 配置 AWS 凭证：
 
 - 触发时选择 `auth=keys`：需要 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`（可选 `AWS_SESSION_TOKEN`）
 - 触发时选择 `auth=oidc`：需要 `AWS_ROLE_TO_ASSUME`（OIDC AssumeRole）

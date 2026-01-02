@@ -53,6 +53,32 @@ jobs:
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
 
+      - name: Preflight AWS credentials
+        run: |
+          set -euo pipefail
+          echo "auth=${{ inputs.auth }}"
+
+          if [ "${{ inputs.auth }}" = "oidc" ]; then
+            if [ -z "${AWS_ROLE_TO_ASSUME:-}" ]; then
+              echo "::error::Missing secret AWS_ROLE_TO_ASSUME. Add it in Settings -> Secrets and variables -> Actions."
+              exit 1
+            fi
+            echo "OK: AWS_ROLE_TO_ASSUME is set."
+            exit 0
+          fi
+
+          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "::error::Missing AWS access key secrets. Add AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in Settings -> Secrets and variables -> Actions."
+            echo "::error::If you are using SSO, create an access key for an IAM user (or use auth=oidc)."
+            exit 1
+          fi
+
+          echo "OK: AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY are set."
+        env:
+          AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
       - name: Configure AWS credentials (OIDC)
         if: ${{ inputs.auth == 'oidc' }}
         uses: aws-actions/configure-aws-credentials@v4
