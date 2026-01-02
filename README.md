@@ -188,6 +188,8 @@ make verify-e2e
 ![](demo/1.png)
 ![](demo/2.png)
 ![](demo/3.png)
+![](<demo/0-1.png>)
+![](<demo/0-2.png>)
 
 ⸻
 
@@ -247,20 +249,12 @@ make ge-status
 ⸻
 
 🧯 Replay / Recovery
-
 	•	S3-copy replay（推荐）：无需 sqs:SendMessage，触发同一条 S3→ingest→SQS 路径。
-
 	scripts/replay.sh s3://$BRONZE/bronze/shipments/ bronze/replay/$(date -u +%Y%m%dT%H%M%SZ)/
-
 	•	Direct SQS replay：需要队列上的 sqs:SendMessage。
-
 	python3 scripts/replay_from_s3.py --bucket "$BRONZE" --prefix bronze/shipments/ --queue-url "$(terraform -chdir=infra/terraform/envs/dev output -raw queue_url)"
-
 	•	DLQ redrive（SQS 原生）：
-
 	scripts/dlq-redrive.sh
-
-
 
 ⸻
 
