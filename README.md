@@ -577,7 +577,7 @@ If you still hit IAM/SQS permissions:
 
 ### Transform dependency
 
-The transform function writes Parquet via the AWS SDK for pandas layer (includes `pyarrow`) configured in `infra/terraform/envs/dev/dev.tfvars:1`.
+The transform function writes Parquet via the AWS SDK for pandas layer (includes `pyarrow`) configured in `infra/terraform/envs/dev/dev.tfvars:4`.
 
 ### Observability (alarms/dashboard)
 
@@ -586,4 +586,4 @@ Terraform can create CloudWatch alarms + a dashboard via `infra/terraform/module
 - `cloudwatch:PutMetricAlarm`
 - `cloudwatch:PutDashboard`
 
-In that case, keep `observability_enabled = false` (default in `infra/terraform/envs/dev/dev.tfvars:1`).
+In that case, set `observability_enabled = false` in `infra/terraform/envs/dev/dev.tfvars:5` and re-apply (this repo defaults it to `true`).
