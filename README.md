@@ -31,12 +31,14 @@ No VPC/EC2 is required for the minimal path.
 
 | Aspect | v1 (Minimal) | v2.0 (Enterprise track) |
 |---|---|---|
-| Pipeline | S3 → Lambda → SQS → Lambda → S3 | Same + optional workflows |
-| Idempotency | DynamoDB object-level | Powertools Idempotency (DDB TTL) |
-| Recovery | Basic | Replay + DLQ redrive helpers |
-| Queryability | S3 only | Optional Glue Catalog/Crawler + Athena |
-| Data quality | — | Optional Glue Job + GE gate |
-| CI/CD | Local apply | CI + manual Terraform workflow |
+| Pipeline | S3 → Lambda → SQS → Lambda → S3 | EventBridge / Step Functions + Glue + GE |
+| Idempotency | DDB object-level lock| Powertools (DynamoDB TTL) + replay / backfill |
+| Recovery | Manual | Replay + DLQ redrive `scripts/.sh` helpers |
+| Queryability | S3 only | Glue Catalog / Crawler + Athena |
+| Data quality | — | Glue Job + Great Expectations gate |
+| Storage | JSONL → Parquet | Parquet + Glue tables (compaction) + Athena |
+| Observability | Logs only | CloudWatch Dashboards + Alarms |
+| CI/CD | Local apply | CI + manual Terraform plan/apply (keys/OIDC) |
 
 ## Quickstart (local)
 
