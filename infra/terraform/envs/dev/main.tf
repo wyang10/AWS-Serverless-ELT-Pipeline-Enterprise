@@ -108,10 +108,10 @@ module "ingest_lambda" {
   timeout       = 30
   memory_size   = 256
   environment = {
-    QUEUE_URL         = local.queue_url
-    IDEMPOTENCY_TABLE = module.idempotency_table.name
-    LOCK_SECONDS      = "900"
-    LOG_LEVEL         = "INFO"
+    QUEUE_URL               = local.queue_url
+    IDEMPOTENCY_TABLE       = module.idempotency_table.name
+    IDEMPOTENCY_TTL_SECONDS = tostring(30 * 24 * 60 * 60)
+    LOG_LEVEL               = "INFO"
   }
   tags = local.tags
 }

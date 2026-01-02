@@ -17,5 +17,5 @@ def test_transform_returns_partial_failures_when_bad_json(monkeypatch):
             {"messageId": "m2", "body": "not-json"},
         ]
     }
-    resp = transform.handler(event, context=type("C", (), {"aws_request_id": "r1"})())
+    resp = transform.handler(event, context=type("C", (), {"aws_request_id": "r1", "function_name": "serverless-elt-transform"})())
     assert {"itemIdentifier": "m2"} in resp["batchItemFailures"]

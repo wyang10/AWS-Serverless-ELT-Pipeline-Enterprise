@@ -76,7 +76,7 @@ data "aws_iam_policy_document" "ingest" {
   }
 
   statement {
-    actions   = ["dynamodb:UpdateItem"]
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem"]
     resources = [var.idempotency_table_arn]
   }
 }

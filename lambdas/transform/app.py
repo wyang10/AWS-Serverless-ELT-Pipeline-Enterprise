@@ -18,6 +18,7 @@ Environment variables:
 - `MAX_RECORDS_PER_FILE` (default: 5000)
 - `QUALITY_EVENTBRIDGE_ENABLED` (default: false)
 - `QUALITY_EVENTBUS_NAME` (default: "default"), `QUALITY_EVENT_SOURCE`, `QUALITY_EVENT_DETAIL_TYPE`
+- Powertools: structured logs + embedded metrics (no extra CloudWatch permissions required)
 """
 
 import io
@@ -27,8 +28,15 @@ from typing import Any, Dict, List, Tuple
 
 import boto3
 
+from aws_lambda_powertools import Logger, Metrics
+from aws_lambda_powertools.metrics import MetricUnit
+
 from lambdas.shared.schemas import normalize_record, partition_dt, to_pyarrow_schema
-from lambdas.shared.utils import chunked, env, json_dumps, log, new_id
+from lambdas.shared.utils import chunked, env, json_dumps, new_id
+
+
+logger = Logger(service="serverless-elt.transform")
+metrics = Metrics(namespace="ServerlessELT", service="transform")
 
 
 def _clients():
@@ -46,6 +54,11 @@ def _s3_put_parquet(s3, bucket: str, key: str, records: List[Dict[str, Any]], re
     s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
 
 
+def _log(event: str, **fields: Any) -> None:
+    logger.info(event, extra=fields)
+
+
+@metrics.log_metrics(capture_cold_start_metric=True)
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     out_bucket = env("SILVER_BUCKET")
     base_prefix = env("SILVER_PREFIX", "silver")
@@ -60,6 +73,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     records = event.get("Records", [])
     failures: List[Dict[str, str]] = []
 
+    metrics.add_metric(name="MessagesReceived", unit=MetricUnit.Count, value=len(records))
+
     # Parse + normalize messages. Bad messages become partial failures (retries/DLQ).
     good: List[Tuple[str, Dict[str, Any], str]] = []
     for r in records:
@@ -70,7 +85,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             record_type = normalized["record_type"]
             good.append((msg_id, normalized, record_type))
         except Exception as e:
-            log("transform_bad_message", message_id=msg_id, error=str(e))
+            _log("transform_bad_message", message_id=msg_id, error=str(e))
             if msg_id:
                 failures.append({"itemIdentifier": msg_id})
 
@@ -91,9 +106,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 _s3_put_parquet(s3, out_bucket, key, only_records, record_type=record_type)
                 written_files += 1
                 partitions_written[(record_type, dt)] = partitions_written.get((record_type, dt), 0) + 1
-                log("transform_write_ok", record_type=record_type, dt=dt, key=key, count=len(only_records))
+                _log("transform_write_ok", record_type=record_type, dt=dt, key=key, count=len(only_records))
             except Exception as e:
-                log("transform_write_error", record_type=record_type, dt=dt, error=str(e))
+                _log("transform_write_error", record_type=record_type, dt=dt, error=str(e))
                 failures.extend({"itemIdentifier": msg_id} for msg_id, _ in items_chunk if msg_id)
 
     # Optional: notify downstream orchestration that a partition is ready for quality validation.
@@ -123,9 +138,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             for chunk in chunked(entries, 10):
                 resp = events.put_events(Entries=chunk)
                 failed += int(resp.get("FailedEntryCount", 0))
-            log("quality_events_emitted", entries=len(entries), failed=failed)
+            _log("quality_events_emitted", entries=len(entries), failed=failed)
         except Exception as e:
-            log("quality_events_emit_error", error=str(e))
+            _log("quality_events_emit_error", error=str(e))
+
+    metrics.add_metric(name="FilesWritten", unit=MetricUnit.Count, value=written_files)
+    if failures:
+        metrics.add_metric(name="MessagesFailed", unit=MetricUnit.Count, value=len(failures))
 
     return {"batchItemFailures": failures}
 
