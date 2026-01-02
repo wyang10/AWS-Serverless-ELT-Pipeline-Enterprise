@@ -54,9 +54,16 @@ S3 (bronze/*.jsonl)
 repo-root/
 ├─ README.md
 ├─ Makefile
+├─ configs/                 # dataset configs (scaffolded)
+├─ dq/                      # per-dataset lightweight DQ rules (scaffolded)
+├─ data_samples/            # per-dataset JSONL samples (scaffolded)
+├─ templates/               # scaffolding templates
 ├─ scripts/
+│  ├─ gen_fake_events.py
 │  ├─ replay_from_s3.py
-│  └─ gen_fake_events.py
+│  ├─ replay.sh             # wrapper: S3 copy replay
+│  ├─ redrive.sh            # wrapper: DLQ → main queue (SQS native redrive)
+│  └─ scaffold.sh           # generate new dataset skeleton
 ├─ lambdas/
 │  ├─ ingest/
 │  │  ├─ app.py
@@ -121,6 +128,14 @@ export AWS_DEFAULT_REGION=us-east-2
 aws sts get-caller-identity
 ```
 
+如果你希望固定使用 IAM User profile（例如 `audrey-tf`）但本机没有该 profile：
+
+```bash
+make profile-audrey-tf
+export AWS_PROFILE=audrey-tf
+aws sts get-caller-identity
+```
+
 ### 3) 本地单测（可选但推荐）
 
 ```bash
@@ -143,6 +158,8 @@ make build
 make tf-init
 TF_AUTO_APPROVE=1 make tf-apply
 ```
+
+说明：`infra/terraform/envs/dev/dev.tfvars` 里通过开关控制可选模块（ops/glue/ge/observability）。本 repo 默认 `observability_enabled=true`；如果你的账号缺少 CloudWatch `PutMetricAlarm/PutDashboard` 权限，可先设为 `false` 再 apply。
 
 如果你遇到 `sqs:ListQueueTags` 的 403（有些账号禁止读 tags），用下面“无 tag API”的方式绕过：
 
@@ -201,6 +218,34 @@ make ge-start GE_RECORD_TYPE=shipments GE_DT=2025-12-31 GE_RESULT_PREFIX=ge/resu
 make ge-status
 make ge-history
 ```
+
+## GitHub Actions（更像企业交付）
+
+本仓库包含：
+
+- `.github/workflows/ci.yml`：`pytest` + `terraform fmt -check`
+- `.github/workflows/terraform-manual.yml`：手动触发的 `plan/apply/destroy`（企业版工作流）
+
+`terraform-manual` 需要在 GitHub Repo Secrets 配置 AWS 凭证（推荐 OIDC）：
+
+- 推荐：`AWS_ROLE_TO_ASSUME`（OIDC AssumeRole）
+- 或者：`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`（可选 `AWS_SESSION_TOKEN`）
+- `TF_BACKEND_HCL`：远端 backend 配置（不提供时只允许 `plan`；会阻止 `apply/destroy` 以避免 runner 本地 state）
+
+## Dataset Scaffold（快速扩展新数据集）
+
+一行生成 4 个文件（config/handler/dq/sample）：
+
+```bash
+make scaffold DATASET=ups_shipping
+ls -la configs/ups_shipping.yaml lambdas/transform/ups_shipping/handler.py dq/ups_shipping/rules.yaml data_samples/ups_shipping/sample.jsonl
+```
+
+下一步：
+
+- 编辑 `configs/<dataset>.yaml`（prefix/idempotency_key/output_columns）
+- 实现 `lambdas/transform/<dataset>/handler.py` 的字段映射
+- （可选）在 `dq/<dataset>/rules.yaml` 补充轻量规则或映射到 GE
 
 ## E2E 验收清单（见截图）
 

@@ -1,0 +1,121 @@
+name: terraform-manual
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to run"
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      tf_dir:
+        description: "Terraform environment directory"
+        required: true
+        default: infra/terraform/envs/dev
+        type: string
+      tf_var_file:
+        description: "Terraform var-file (relative to tf_dir)"
+        required: true
+        default: dev.tfvars
+        type: string
+      confirm:
+        description: "Type APPLY or DESTROY to confirm destructive actions"
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials (OIDC)
+        if: ${{ secrets.AWS_ROLE_TO_ASSUME != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: us-east-2
+
+      - name: Configure AWS credentials (access keys)
+        if: ${{ secrets.AWS_ROLE_TO_ASSUME == '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-2
+
+      - name: Build lambda artifacts (required for plan/apply)
+        run: |
+          python -m pip install --upgrade pip
+          make build
+
+      - name: Prepare remote backend config (optional)
+        id: backend
+        run: |
+          set -euo pipefail
+          if [ -n "${TF_BACKEND_HCL:-}" ]; then
+            echo "$TF_BACKEND_HCL" > "${{ inputs.tf_dir }}/_backend.hcl"
+            echo "backend_file=${{ inputs.tf_dir }}/_backend.hcl" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          TF_BACKEND_HCL: ${{ secrets.TF_BACKEND_HCL }}
+
+      - name: Terraform init
+        run: |
+          set -euo pipefail
+          if [ -n "${{ steps.backend.outputs.backend_file }}" ]; then
+            terraform -chdir="${{ inputs.tf_dir }}" init -backend-config="${{ steps.backend.outputs.backend_file }}"
+          else
+            echo "::warning::TF_BACKEND_HCL not set; using local backend in runner (plan is still useful, apply/destroy is blocked)."
+            terraform -chdir="${{ inputs.tf_dir }}" init
+          fi
+
+      - name: Terraform plan
+        if: ${{ inputs.action == 'plan' }}
+        run: |
+          terraform -chdir="${{ inputs.tf_dir }}" plan -var-file="${{ inputs.tf_var_file }}"
+
+      - name: Terraform apply (requires TF_BACKEND_HCL + confirm=APPLY)
+        if: ${{ inputs.action == 'apply' }}
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.confirm }}" != "APPLY" ]; then
+            echo "Refusing to apply. Re-run with confirm=APPLY."
+            exit 1
+          fi
+          if [ -z "${{ steps.backend.outputs.backend_file }}" ]; then
+            echo "Refusing to apply with local backend in runner. Set secret TF_BACKEND_HCL for remote state."
+            exit 1
+          fi
+          terraform -chdir="${{ inputs.tf_dir }}" apply -auto-approve -var-file="${{ inputs.tf_var_file }}"
+
+      - name: Terraform destroy (requires TF_BACKEND_HCL + confirm=DESTROY)
+        if: ${{ inputs.action == 'destroy' }}
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.confirm }}" != "DESTROY" ]; then
+            echo "Refusing to destroy. Re-run with confirm=DESTROY."
+            exit 1
+          fi
+          if [ -z "${{ steps.backend.outputs.backend_file }}" ]; then
+            echo "Refusing to destroy with local backend in runner. Set secret TF_BACKEND_HCL for remote state."
+            exit 1
+          fi
+          terraform -chdir="${{ inputs.tf_dir }}" destroy -auto-approve -var-file="${{ inputs.tf_var_file }}"

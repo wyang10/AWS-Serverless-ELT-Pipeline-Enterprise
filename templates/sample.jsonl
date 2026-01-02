@@ -1,0 +1,3 @@
+{"event_id":"{{DATASET}}-001","event_ts":"2026-01-01T00:00:00Z","carrier":"UPS","tracking_number":"1Z999AA10123456784","status":"CREATED"}
+{"event_id":"{{DATASET}}-002","event_ts":"2026-01-01T01:00:00Z","carrier":"UPS","tracking_number":"1Z999AA10123456785","status":"IN_TRANSIT"}
+{"event_id":"{{DATASET}}-002","event_ts":"2026-01-01T01:00:00Z","carrier":"UPS","tracking_number":"1Z999AA10123456785","status":"IN_TRANSIT"}

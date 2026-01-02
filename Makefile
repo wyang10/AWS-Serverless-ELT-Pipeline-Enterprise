@@ -1,7 +1,7 @@
 .PHONY: help test build build-ingest build-transform build-ops-replay build-ops-quality clean tf-init tf-plan tf-apply tf-destroy \
 	ops-start ops-status ops-history glue-crawler-start glue-crawler-status glue-job-start glue-job-status ge-start ge-status ge-history \
 	verify-whoami verify-tf-outputs verify-s3-notifications verify-lambdas verify-ddb verify-sqs verify-seed verify-silver verify-idempotency \
-	verify-glue verify-ge verify-observability verify-e2e profile-audrey-tf
+	verify-glue verify-ge verify-observability verify-e2e profile-audrey-tf scaffold
 
 PY ?= python3
 TF_DIR ?= infra/terraform/envs/dev
@@ -58,6 +58,7 @@ help:
 	@echo "  ge-history          Show recent GE execution events"
 	@echo "  verify-e2e          Run screenshot-able E2E checks"
 	@echo "  profile-audrey-tf   Create/update local AWS profile alias (audrey-tf)"
+	@echo "  scaffold       Generate dataset scaffolding (DATASET=ups_shipping)"
 
 test:
 	$(PY) -m pytest -q
@@ -377,3 +378,7 @@ verify-observability:
 	echo "OK dashboard=$$DASH"
 
 verify-e2e: verify-whoami verify-tf-outputs verify-s3-notifications verify-lambdas verify-ddb verify-sqs verify-seed verify-silver verify-idempotency verify-glue verify-ge verify-observability
+
+scaffold:
+	@test -n "$(DATASET)" || (echo "Usage: make scaffold DATASET=ups_shipping" && exit 1)
+	@./scripts/scaffold.sh "$(DATASET)"
