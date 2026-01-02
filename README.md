@@ -573,6 +573,7 @@ If you still hit IAM/SQS permissions:
 
 - **IAM role name restrictions**: set `iam_name_prefix` in `infra/terraform/envs/dev/dev.tfvars:1` to a permitted prefix.
 - **SQS tag read restrictions** (e.g., missing `sqs:ListQueueTags`): pre-create the queue and feed Terraform:
+  - Easiest fix is to allow `sqs:ListQueueTags` (read-only) on your IAM user/role.
   - `python scripts/create_sqs_queue.py --name <project>-<suffix>-events --with-dlq --region us-east-2 --out infra/terraform/envs/dev/queue.auto.tfvars.json`
   - Terraform will auto-load `*.auto.tfvars.json` and skip managing SQS when `existing_queue_url`/`existing_queue_arn` are provided.
 - **Attach a DLQ to an existing queue**:
