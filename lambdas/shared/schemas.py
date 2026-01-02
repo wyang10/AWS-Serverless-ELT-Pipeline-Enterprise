@@ -1,3 +1,11 @@
+"""
+Canonical record schemas and normalization.
+
+Why this exists:
+- Keep ingest/transform consistent across datasets.
+- Make the Silver Parquet output predictable for Athena/Glue Catalog.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -86,4 +94,3 @@ def partition_dt(records: Iterable[Dict[str, Any]]) -> str:
             # 2025-01-01T...Z -> 2025-01-01
             return s[:10]
     return datetime.now(timezone.utc).date().isoformat()
-

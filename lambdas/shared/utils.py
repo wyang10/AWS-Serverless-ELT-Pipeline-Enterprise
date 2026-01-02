@@ -1,3 +1,12 @@
+"""
+Shared helpers used by all Lambdas in this repo.
+
+Design goals:
+- Keep Lambda handlers small and focused.
+- Provide consistent JSON logging (`log(...)`) for CloudWatch Logs Insights.
+- Centralize small utilities (env parsing, S3 event parsing, JSONL iteration).
+"""
+
 import json
 import logging
 import os
