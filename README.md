@@ -1,324 +1,124 @@
-# AWS Serverless ELT Pipeline — v2.0 (Enterprise-ready)
+# AWS Serverless ELT Pipeline (v2.0 — Enterprise Track)
 
-> 轻量起步，企业化能力随开随用：**S3 → Lambda → SQS → Lambda → S3(Parquet)**，可选编排、目录、质量门禁与可观测性。
+Production-lite, resume-ready serverless ELT: **S3 (bronze JSONL) → Lambda ingest → SQS (+ DLQ) → Lambda transform → S3 (silver Parquet)**, with optional orchestration, catalog/query, quality gating, and observability.
 
-This v2.0 elevates the minimal v1 into a **production-ready, enterprise-style** framework:
-- **Orchestration (optional):** EventBridge → Step Functions → Glue Job (+ optional **Great Expectations** gate)
-- **Catalog / Query (optional):** Glue Data Catalog + Crawler + Athena tables for **silver/** Parquet
-- **Replay / Recovery:** `replay` & `redrive` scripts for backfill and poison-message recovery
-- **Idempotency:** Object-level dedup via DynamoDB TTL (Powertools Idempotency)
-- **CI/CD:** GitHub Actions CI (pytest + terraform fmt) + manual Terraform plan/apply (supports keys/OIDC)
+## Architecture
 
----
-
-## 🧩 Architecture
-
-```
-
+```text
 S3 (bronze/*.jsonl)
-  └─(ObjectCreated)
-     Lambda ingest (Powertools logging/metrics + DynamoDB idempotency)
-        └─ SQS (events) ──(event source mapping)──> Lambda transform (Parquet)
-              └─ DLQ (optional)
-                                └─ S3 (silver/*.parquet) ──> (optional) Glue Catalog & Athena
-
+  └─ ObjectCreated
+     └─ Lambda ingest (Powertools logs/metrics/idempotency)
+         └─ SQS (events) + DLQ (optional)
+             └─ Lambda transform (Parquet writer)
+                 └─ S3 (silver/…/*.parquet)
+                     └─ (optional) Glue Catalog/Crawler → Athena
+                     └─ (optional) Step Functions → Glue Job (+ Great Expectations gate)
 ```
 
-**No VPC / EC2 / API Gateway required** for the minimal path. API Gateway can be added later for sync APIs if needed.
+No VPC/EC2 is required for the minimal path.
 
----
+## What’s included
 
-## 🔁 v1 vs v2.0
+- **Idempotency:** AWS Lambda Powertools Idempotency backed by DynamoDB (conditional writes + TTL under the hood).
+- **Replay/Recovery:** `scripts/replay.sh` (S3-copy replay) + `scripts/redrive.sh` (SQS native redrive).
+- **Ops orchestration (optional):** Step Functions workflow for replay/backfill + downstream readiness polling.
+- **Catalog/Query (optional):** Glue Data Catalog + Crawler to query `silver/` Parquet in Athena.
+- **Quality gate (optional):** Glue Job + Step Functions (optionally auto-triggered via EventBridge).
+- **Observability (optional):** CloudWatch Dashboard + Alarms.
+- **Delivery:** Terraform modules + GitHub Actions (CI + manual Terraform plan/apply).
 
-| Aspect | v1 (Minimal) | v2.0 (Enterprise-ready) |
+## v1 vs v2.0
+
+| Aspect | v1 (Minimal) | v2.0 (Enterprise track) |
 |---|---|---|
-| Pipeline | S3→Lambda→SQS→Lambda→S3 | Same + Step Functions orchestration |
-| Storage | JSONL → Parquet | Parquet + Glue tables for Athena |
-| Idempotency | DDB object-level lock | Powertools Idempotency (DynamoDB TTL) + replay/backfill |
-| Replay / DLQ | Manual | `scripts/replay.sh`, `scripts/redrive.sh` |
-| Observability | Logs only | (optional) CloudWatch Dashboards + Alarms |
-| CI/CD | Manual apply | GitHub Actions CI + manual terraform plan/apply (keys/OIDC) |
-| DQ | – | Glue Job + optional Great Expectations gate |
+| Pipeline | S3 → Lambda → SQS → Lambda → S3 | Same + optional workflows |
+| Idempotency | DynamoDB object-level | Powertools Idempotency (DDB TTL) |
+| Recovery | Basic | Replay + DLQ redrive helpers |
+| Queryability | S3 only | Optional Glue Catalog/Crawler + Athena |
+| Data quality | — | Optional Glue Job + GE gate |
+| CI/CD | Local apply | CI + manual Terraform workflow |
 
----
-
-## 🌟 What this framework gives you
-
-- **🚀 One-command deploy**: Terraform modules + per-env toggles，支持 GitHub Actions OIDC。
-- **🧱 Robust by design**: 对象级幂等、SQS 局部批失败、DLQ redrive、可回放。
-- **⚙️ Easy extensibility**: `make scaffold DATASET=<name>` 生成配置/处理器/DQ 模板/样例。
-- **📊 Built-in observability**: (可选) CloudWatch Dashboards & Alarms。
-- **🔍 Query-ready**: (可选) Glue Catalog + Crawler + Athena 表。
-- **✅ Quality gate**: (可选) GE 质量门禁（Glue Job 内运行，Step Functions 编排）。
-
----
-
-## 📁 Repo Layout
-
-```
-repo-root/
-├─ README.md
-├─ ROADMAP.md
-├─ Makefile
-├─ templates/                   # scaffolding blueprints
-├─ scripts/
-│  ├─ gen_fake_events.py
-│  ├─ replay_from_s3.py         # S3→SQS 直推 (需要 sqs:SendMessage)
-│  ├─ replay.sh                 # S3 copy 到新的 bronze/ 前缀（推荐，无需 SQS 发信权限）
-│  ├─ redrive.sh                # SQS 原生 redrive
-│  └─ scaffold.sh               # 生成 dataset 骨架
-├─ configs/                     # 每个 dataset 的元配置
-├─ dq/                          # 轻量 DQ 规则（或映射到 GE）
-├─ data_samples/                # 样例 JSON/JSONL
-├─ lambdas/
-│  ├─ ingest/
-│  │  ├─ app.py
-│  │  ├─ requirements.txt
-│  │  └─ tests/
-│  ├─ transform/
-│  │  ├─ app.py
-│  │  ├─ requirements.txt
-│  │  └─ tests/
-│  └─ shared/
-│     ├─ init.py
-│     ├─ schemas.py
-│     └─ utils.py
-└─ infra/
-└─ terraform/
-├─ backend/backend.hcl
-├─ modules/
-│  ├─ storage/            # S3 bronze/silver, notifications
-│  ├─ queue/              # SQS + DLQ
-│  ├─ lambdas/            # ingest / transform
-│  ├─ ddb/                # idempotency table (+ TTL)
-│  ├─ catalog/            # Glue DB + Crawler
-│  ├─ glue_job/           # Compaction / GE runner
-│  ├─ workflow_ops/       # EventBridge + Step Functions
-│  └─ observability/      # Dashboards + Alarms
-└─ envs/
-└─ dev/
-├─ main.tf
-├─ dev.tfvars       # toggles: glue/ge/ops/observability
-└─ *.auto.tfvars.json  # （可选）注入外部 SQS/ARN 等
-
-```
-
----
-
-## 🧰 Prereqs
-
-- Python **3.11+**
-- Terraform **1.6+**
-- AWS credentials for a **dev** account (region 默认 `us-east-2`)
-- (Optional) Docker
-
----
-
-## ⚡ Quickstart
-
-> 默认区域：`us-east-2`。如果你的组织限制 CloudWatch `PutMetricAlarm/PutDashboard`，先把 `observability_enabled=false`（见下文）。
+## Quickstart (local)
 
 ```bash
-# 0) Setup
+git clone https://github.com/wyang10/AWS-Serverless-ELT-Pipeline-Enterprise.git
+cd AWS-Serverless-ELT-Pipeline-Enterprise
+
 python3 -m venv .venv && source .venv/bin/activate
 python -m pip install -U pip
 python -m pip install -r requirements-dev.txt
+
 export AWS_REGION=us-east-2
 export AWS_DEFAULT_REGION=us-east-2
-aws sts get-caller-identity   # 确认 Account/Arn
+aws sts get-caller-identity
 
-# 1) Build Lambda artifacts
 make build
-
-# 2) Terraform init + apply
 make tf-init
 TF_AUTO_APPROVE=1 make tf-apply
+```
 
-Upload a small seed to trigger the pipeline:
+Run end-to-end verification (screenshot-able checks):
 
-BRONZE=$(terraform -chdir=infra/terraform/envs/dev output -raw bronze_bucket)
-python3 scripts/gen_fake_events.py --type shipments --count 50 --format jsonl --out /tmp/shipments.jsonl
-aws s3 cp /tmp/shipments.jsonl "s3://$BRONZE/bronze/shipments/manual/shipments-$(date -u +%Y%m%dT%H%M%SZ).jsonl"
-
-Check silver outputs:
-
-SILVER=$(terraform -chdir=infra/terraform/envs/dev output -raw silver_bucket)
-aws s3 ls "s3://$SILVER/silver/shipments/" --recursive | tail
-
-
-⸻
-
-✅ E2E Verification (one-liners)
-
-# Who am I / region pinned
-make verify-whoami
-
-# Terraform outputs exist
-make verify-tf-outputs
-
-# S3 notifications wired (bronze -> ingest)
-make verify-s3-notifications
-
-# Lambdas reachable
-make verify-lambdas
-
-# DDB idempotency table + TTL
-make verify-ddb
-
-# SQS health + (optional) DLQ
-make verify-sqs
-
-# Seed end-to-end and verify silver
-make verify-seed && make verify-silver
-
-# Idempotency: same object twice → second invoke skipped>=1
-make verify-idempotency
-
-# End to End Validation
+```bash
 make verify-e2e
+```
+
+For the full E2E checklist and troubleshooting, see `Instructions.md`.
+
+## Feature toggles (Terraform)
+
+Edit `infra/terraform/envs/dev/dev.tfvars`:
+
+- `observability_enabled`: CloudWatch dashboard + alarms
+- `ops_enabled`: ops Step Functions workflow (replay + polling)
+- `glue_enabled`: Glue database + crawler (Athena tables)
+- `glue_job_enabled`: compaction/recompute Glue job
+- `ge_enabled`: Great Expectations Glue job + state machine (quality gate)
+- `ge_workflow_enabled`: Step Functions quality gate workflow
+- `ge_emit_events_from_transform`: have `transform` emit EventBridge events after success
+- `ge_eventbridge_enabled`: create an EventBridge rule to auto-start the GE workflow
+
+Recommendation: keep `ge_emit_events_from_transform=false` and `ge_eventbridge_enabled=false` until you’re ready to run the gate automatically (and handle failures/quarantine paths).
+
+## Common ops commands
+
+- Deploy: `make build && TF_AUTO_APPROVE=1 make tf-apply`
+- Destroy: `TF_AUTO_APPROVE=1 make tf-destroy` (empty S3 buckets first; details in `Instructions.md`)
+- Start ops workflow: `make ops-start` (then `make ops-status`)
+- Run Glue crawler: `make glue-crawler-start`
+- Run compaction job: `make glue-job-start GLUE_RECORD_TYPE=shipments GLUE_DT=2025-12-31 GLUE_OUTPUT_PREFIX=silver_compacted`
+- Run GE gate: `make ge-start GE_RECORD_TYPE=shipments GE_DT=2025-12-31`
+
+## Repo layout (actual)
+
+```text
+.
+├─ .github/workflows/                 # CI + manual terraform workflow
+├─ infra/terraform/
+│  ├─ backend/backend.hcl
+│  ├─ envs/dev/                       # entrypoint env (dev.tfvars, outputs.tf)
+│  └─ modules/                        # reusable IaC modules
+├─ lambdas/
+│  ├─ ingest/app.py                   # S3 event → SQS (idempotent)
+│  ├─ transform/app.py                # SQS batch → Parquet in S3
+│  ├─ workflows/                      # Step Functions task Lambdas
+│  └─ shared/                         # shared helpers/schema
+├─ scripts/                           # replay/redrive/scaffold/verification helpers
+├─ templates/                         # dataset scaffolding templates
+├─ configs/                           # dataset configs (scaffolded)
+├─ dq/                                # lightweight DQ rules (scaffolded)
+├─ data_samples/                      # sample JSONL (scaffolded)
+├─ demo/                              # screenshots
+├─ Instructions.md
+└─ LICENSE
+```
+
+## Screenshots
 
 ![](demo/1.png)
 ![](demo/2.png)
 ![](demo/3.png)
 
+## License
 
-⸻
-
-🧪 Idempotency Model
-	•	Scope: S3 object-level (bucket/key#etag)
-	•	Store: DynamoDB with TTL (Powertools Idempotency)
-	•	SQS consumer: partial batch failure + DLQ redrive 脚本
-
-⸻
-
-📚 Catalog & Query (optional)
-
-Enable Glue DB + Crawler（并供 Athena 查询）：
-
-1. infra/terraform/envs/dev/dev.tfvars：
-
-glue_enabled = true
-# glue_silver_prefix = "silver/"
-# glue_table_prefix  = "silver_"
-
-2. 部署：
-
-TF_AUTO_APPROVE=1 make tf-apply
-make glue-crawler-start
-make glue-crawler-status
-
-Then query in Athena:
-
-SELECT dt, shipment_id, origin, destination, carrier, weight_kg, event_time
-FROM "<glue_db>".silver
-WHERE record_type='shipments'
-ORDER BY dt DESC, event_time DESC
-LIMIT 20;
-
-
-⸻
-
-🧵 Step Functions & Quality Gate (optional)
-	•	Ops workflow（replay+quality polling）：modules/workflow_ops
-	•	Great Expectations：在 Glue Job 内跑（容器化依赖更稳定），由 Step Functions 触发
-
-Enabling flags in dev.tfvars（按需）：
-
-ops_enabled           = true
-ge_enabled            = true
-ge_workflow_enabled   = true
-# ge_emit_events_from_transform = true   # transform 成功后发 EventBridge 触发 GE
-# ge_eventbridge_enabled        = true
-
-Run:
-
-make ops-start && make ops-status && make ops-history
-make ge-start GE_RECORD_TYPE=shipments GE_DT=2025-12-31 GE_RESULT_PREFIX=ge/results
-make ge-status
-
-
-⸻
-
-🧯 Replay / Recovery
-	•	S3-copy replay（推荐）：无需 sqs:SendMessage，触发同一条 S3→ingest→SQS 路径。
-	./scripts/replay.sh 2026-01-01T00:00:00Z 2026-01-02T00:00:00Z bronze/shipments/
-	•	Direct SQS replay：需要队列上的 sqs:SendMessage。
-	python3 scripts/replay_from_s3.py --bucket "$BRONZE" --prefix bronze/shipments/ --queue-url "$(terraform -chdir=infra/terraform/envs/dev output -raw queue_url)"
-	•	DLQ redrive（SQS 原生）：
-	./scripts/redrive.sh
-
-⸻
-
-🛡️ IAM / Org Gotchas
-	•	CloudWatch：许多组织限制 cloudwatch:PutMetricAlarm / cloudwatch:PutDashboard
-→ 设置 observability_enabled=false 再部署。
-	•	SQS Tag 权限：如果缺 sqs:ListQueueTags/TagQueue，Terraform refresh/create 可能报错
-→ 预创建队列并写入 *.auto.tfvars.json（让 TF 只引用，不管理）。
-	•	IAM Role 命名/Tag 限制：用 iam_name_prefix 统一前缀，并禁用 IAM/SQS tag（本 repo 已默认关闭）。
-
-⸻
-
-🧱 CI/CD (GitHub Actions)
-	•	.github/workflows/ci.yml：pytest + terraform fmt -check
-	•	.github/workflows/terraform-manual.yml：手动 plan/apply/destroy（OIDC 首选；无明文密钥）
-
-Secrets:
-	•	OIDC：AWS_ROLE_TO_ASSUME
-	•	Keys（如需）：AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY（可选 AWS_SESSION_TOKEN）
-	•	可选：TF_BACKEND_HCL（远端 state 配置；不提供时限制 apply/destroy）
-
-⸻
-
-🧪 Dataset Scaffold
-
-快速生成一个新数据集骨架：
-
-make scaffold DATASET=ups_shipping
-# 将生成：
-#   configs/ups_shipping.yaml
-#   lambdas/transform/ups_shipping/handler.py
-#   dq/ups_shipping/rules.yaml
-#   data_samples/ups_shipping/sample.jsonl
-
-调整 configs/<dataset>.yaml（prefix/idempotency_key/output columns），实现 handler 映射逻辑，即可接入。
-
-⸻
-
-🧹 Cleanup
-
-S3 必须先清空再 destroy：
-
-TF_AUTO_APPROVE=1 make tf-destroy || true
-
-BRONZE=$(terraform -chdir=infra/terraform/envs/dev output -raw bronze_bucket)
-SILVER=$(terraform -chdir=infra/terraform/envs/dev output -raw silver_bucket)
-aws s3 rm "s3://$BRONZE" --recursive || true
-aws s3 rm "s3://$SILVER" --recursive || true
-
-TF_AUTO_APPROVE=1 make tf-destroy
-
-
-⸻
-
-🗺️ Changelog v2.0
-	1.	触发编排：EventBridge → Step Functions（DQ 阶段），Task 跑 Glue Job（可选接 GE）
-	2.	可查询终点：注册 Glue Catalog + Athena 表（silver/*.parquet）
-	3.	回放闭环：`scripts/replay.sh` / `scripts/replay_from_s3.py` + `scripts/redrive.sh`（DLQ → 主队列）
-	4.	幂等细节：对象级幂等（S3 bucket/key#etag），Powertools Idempotency + DynamoDB TTL
-	5.	CI/CD：GitHub Actions（pytest + terraform fmt；手动触发 terraform plan/apply；支持 keys/OIDC）
-
-⸻
-
-📄 blurb 
-
-- Shipped a serverless ELT pipeline on AWS: S3 bronze JSONL → Lambda ingest → SQS (+ DLQ) → Lambda transform → S3 silver Parquet.
-- Implemented object-level idempotency using DynamoDB conditional writes + TTL to prevent duplicate ingestion on retries/events.
-- Added operational tooling: Step Functions replay/backfill workflow, SQS DLQ redrive, and one-command dataset scaffolding (`make scaffold DATASET=...`).
-- Enabled “query-ready” silver layer via Glue Data Catalog + Crawler for Athena.
-- Delivered infrastructure as code (Terraform modules) and CI automation (pytest + terraform fmt; manual Terraform plan/apply workflow).
-
-⸻
-
-License
-
-MIT
+MIT — see `LICENSE`.
