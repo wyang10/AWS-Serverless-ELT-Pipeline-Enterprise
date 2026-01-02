@@ -228,8 +228,8 @@ make ge-history
 
 `terraform-manual` 需要在 GitHub Repo Secrets 配置 AWS 凭证（推荐 OIDC）：
 
-- 推荐：`AWS_ROLE_TO_ASSUME`（OIDC AssumeRole）
-- 或者：`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`（可选 `AWS_SESSION_TOKEN`）
+- 触发时选择 `auth=keys`：需要 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`（可选 `AWS_SESSION_TOKEN`）
+- 触发时选择 `auth=oidc`：需要 `AWS_ROLE_TO_ASSUME`（OIDC AssumeRole）
 - `TF_BACKEND_HCL`：远端 backend 配置（不提供时只允许 `plan`；会阻止 `apply/destroy` 以避免 runner 本地 state）
 
 ## Dataset Scaffold（快速扩展新数据集）
