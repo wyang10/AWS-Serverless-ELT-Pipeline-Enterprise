@@ -1,11 +1,12 @@
-# v2 Roadmap (Enterprise-ish)
+
+# v2 Roadmap (Enterprise)
 
 Planned order (low risk → high impact):
 
 1) **EventBridge + Step Functions**
    - Scheduled backfill/replay
    - Orchestrated runs with retries/timeouts
-   - Manual approval + notifications (optional)
+   - Manual approval + notifications
 
 2) **Glue (Catalog + Crawler + Job)**
    - Catalog tables for Silver Parquet
@@ -19,4 +20,3 @@ Planned order (low risk → high impact):
 4) **EMR (or EMR Serverless)**
    - Large-scale joins/aggregations/historical recompute
    - Workloads too heavy for Lambda/Glue alone
-
