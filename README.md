@@ -1,4 +1,4 @@
-# AWS Serverless ELT Pipeline (v2.0 — Enterprise Track)
+# AWS Serverless ELT Pipeline (v2.0 — Enterprise)
 
 Production-lite, resume-ready serverless ELT: **S3 (bronze JSONL) → Lambda ingest → SQS (+ DLQ) → Lambda transform → S3 (silver Parquet)**, with optional orchestration, catalog/query, quality gating, and observability.
 
@@ -29,8 +29,8 @@ No VPC/EC2 is required for the minimal path.
 
 ## v1 vs v2.0
 
-| Aspect | v1 (Minimal) | v2.0 (Enterprise track) |
-|---|---|---|
+| Aspect | v1 (Minimal) |  v2.0 (Enterprise)  |
+|---|---|----|
 | Pipeline | S3 → Lambda → SQS → Lambda → S3 | EventBridge / Step Functions + Glue + GE |
 | Idempotency | DDB object-level lock| Powertools (DynamoDB TTL) + replay / backfill |
 | Recovery | Manual | Replay + DLQ redrive `scripts/.sh` helpers |
@@ -40,7 +40,7 @@ No VPC/EC2 is required for the minimal path.
 | Observability | Logs only | CloudWatch Dashboards + Alarms |
 | CI/CD | Local apply | CI + manual Terraform plan/apply (keys/OIDC) |
 
-## Quickstart (local)
+## Quickstart 
 
 ```bash
 git clone https://github.com/wyang10/AWS-Serverless-ELT-Pipeline-Enterprise.git
@@ -67,7 +67,7 @@ make verify-e2e
 
 For the full E2E checklist and troubleshooting, see `Instructions.md`.
 
-## Feature toggles (Terraform)
+## Feature toggles in Terraform
 
 Edit `infra/terraform/envs/dev/dev.tfvars`:
 
@@ -91,7 +91,7 @@ Recommendation: keep `ge_emit_events_from_transform=false` and `ge_eventbridge_e
 - Run compaction job: `make glue-job-start GLUE_RECORD_TYPE=shipments GLUE_DT=2025-12-31 GLUE_OUTPUT_PREFIX=silver_compacted`
 - Run GE gate: `make ge-start GE_RECORD_TYPE=shipments GE_DT=2025-12-31`
 
-## Repo layout (actual)
+## Repo layout 
 
 ```text
 .
