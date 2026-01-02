@@ -1,8 +1,40 @@
 # AWS Serverless ELT Pipeline (v2.0 — Enterprise)
 
-Production-lite, resume-ready serverless ELT: **S3 (bronze JSONL) → Lambda ingest → SQS (+ DLQ) → Lambda transform → S3 (silver Parquet)**, with optional orchestration, catalog/query, quality gating, and observability.
+
+## Project Summary
+
+Built a production-lite, serverless ELT framework on AWS (S3 bronze JSONL → Lambda ingest → SQS (+ DLQ) → Lambda transform → S3 silver Parquet) with optional orchestration, catalog/query, quality gates, and observability.
+
+**Highlights**
+
+- Implemented object-level idempotency using AWS Lambda Powertools Idempotency backed by DynamoDB (conditional writes + TTL) to prevent duplicate ingestion across retries and duplicate events.
+- Designed for reliability with SQS partial batch failure handling, DLQ + redrive tooling, and S3-copy replay for backfills without direct queue access.
+- Produced query-ready Parquet outputs and integrated optional Glue Data Catalog/Crawler so Athena can query the silver layer as tables.
+- Added optional operational workflows (Step Functions) to orchestrate replay/backfill and downstream readiness/quality checks (with optional EventBridge auto-triggering).
+- Delivered infrastructure as code (Terraform modules) and CI automation (pytest + terraform fmt checks; manual Terraform plan/apply workflow supporting OIDC or access keys).
+
 
 ## Architecture
+
+(1) Ingest path (always-on)
+S3 Bronze (jsonl) 
+  -> S3:ObjectCreated 
+  -> Lambda Ingest (Powertools logs/metrics + DDB idempotency)
+  -> SQS Events (DLQ optional)
+  -> Lambda Transform (batch + partial batch failure)
+  -> S3 Silver (parquet)
+
+(2) Query path (optional, consumes Silver)
+S3 Silver (parquet)
+  -> Glue Crawler / Data Catalog
+  -> Athena (SQL query)
+
+(3) Ops/DQ path (optional, operates on Silver)
+S3 Silver (parquet)
+  -> Step Functions
+  -> Glue Job (compaction / recompute) 
+  -> (optional) Great Expectations validation gate
+
 
 ```text
 S3 (bronze/*.jsonl)
@@ -27,6 +59,12 @@ No VPC/EC2 is required for the minimal path.
 - **Observability (optional):** CloudWatch Dashboard + Alarms.
 - **Delivery:** Terraform modules + GitHub Actions (CI + manual Terraform plan/apply).
 
+## Why “optional” is emphasized
+
+This repo is designed so you can keep a minimal, low-cost baseline (the core S3→Lambda→SQS→Lambda→S3 pipeline) and enable “enterprise” capabilities via Terraform toggles. Marking modules as **optional** avoids misunderstandings when:
+
+- You intentionally keep a capability off (cost, complexity, or permissions).
+
 ## v1 vs v2.0
 
 | Aspect | v1 (Minimal) | v2.0 (Enterprise track) |
@@ -39,6 +77,18 @@ No VPC/EC2 is required for the minimal path.
 | Data quality | — | Optional Glue Job + GE gate |
 | Observability | Logs only | Optional CloudWatch dashboards + alarms |
 | CI/CD | Local apply | CI + manual Terraform workflow |
+
+| Aspect | v1 (Minimal) | v2.0 (Enterprise track) |
+|---|---|----|
+| Core pipeline | S3 → Lambda → SQS → Lambda → S3 (Parquet) | Same + production options |
+| Orchestration  | — | EventBridge → Step Functions (replay/backfill + ops/DQ stages) |
+| Idempotency | DDB object-level lock (`bucket/key#etag`) + TTL | Powertools (DynamoDB + TTL) |
+| Recovery | Manual / ad-hoc | Replay scripts + DLQ redrive helpers (repeatable recovery) |
+| Queryability | S3 only | Glue Catalog/Crawler → Athena tables on Silver Parquet |
+| Data quality | — | Step Functions → Glue Job (+ Great Expectations gate) |
+| Storage / compute | JSONL → Parquet | Parquet + Glue job for compaction/recompute |
+| Observability | CloudWatch logs | Powertools logs + metrics;  CloudWatch dashboards + alarms |
+| CI/CD | Local deploy / manual apply | GitHub Actions CI + Terraform workflow (keys/OIDC) |
 
 ## Quickstart 
 
@@ -125,26 +175,4 @@ Recommendation: keep `ge_emit_events_from_transform=false` and `ge_eventbridge_e
 
 MIT — see `LICENSE`.
 
-## Why “optional” is emphasized
 
-This repo is designed so you can keep a minimal, low-cost baseline (the core S3→Lambda→SQS→Lambda→S3 pipeline) and enable “enterprise” capabilities via Terraform toggles. Marking modules as **optional** avoids misunderstandings when:
-
-- You intentionally keep a capability off (cost, complexity, or permissions).
-- Your org policies block certain APIs (for example, CloudWatch dashboard/alarm writes).
-- You want to demonstrate the architecture and the toggles without implying every deployment has every module enabled.
-
-If you enable a module in your environment, it is valid to describe it as “included in my deployment” in interviews.
-
-## Resume-ready project summary (copy/paste)
-
-**One-liner**
-
-Built a production-lite, serverless ELT framework on AWS (S3 bronze JSONL → Lambda ingest → SQS (+ DLQ) → Lambda transform → S3 silver Parquet) with optional orchestration, catalog/query, and data quality gates.
-
-**Highlights**
-
-- Implemented object-level idempotency using AWS Lambda Powertools Idempotency backed by DynamoDB (conditional writes + TTL) to prevent duplicate ingestion across retries and duplicate events.
-- Designed for reliability with SQS partial batch failure handling, DLQ + redrive tooling, and S3-copy replay for backfills without direct queue access.
-- Produced query-ready Parquet outputs and integrated optional Glue Data Catalog/Crawler so Athena can query the silver layer as tables.
-- Added optional operational workflows (Step Functions) to orchestrate replay/backfill and downstream readiness/quality checks (with optional EventBridge auto-triggering).
-- Delivered infrastructure as code (Terraform modules) and CI automation (pytest + terraform fmt checks; manual Terraform plan/apply workflow supporting OIDC or access keys).
