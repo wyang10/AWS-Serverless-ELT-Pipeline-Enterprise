@@ -2,7 +2,7 @@
  * @Author: Audrey Yang 97855340+wyang10@users.noreply.github.com
  * @Date: 2026-01-02 00:03:56
  * @LastEditors: Audrey Yang 97855340+wyang10@users.noreply.github.com
- * @LastEditTime: 2026-01-02 00:20:38
+ * @LastEditTime: 2026-01-02 01:35:46
  * @FilePath: /AWS-Serverless-ELT-Pipeline-Enterprise/README-1.md
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 -->
@@ -21,12 +21,16 @@ This v2.0 elevates the minimal v1 into a **production-ready, enterprise-style** 
 
 ## 🧩 Architecture
 
-S3 (bronze/.jsonl)
-└─(ObjectCreated)
-Lambda ingest (Powertools/DynamoDB idempotency)
-└─ SQS (events) ──(event source mapping)──> Lambda transform (Parquet)
-└─ DLQ (optional)
-└─ S3 (silver/.parquet) ──> (optional) Glue Catalog & Athena
+```
+
+S3 (bronze/*.jsonl)
+  └─(ObjectCreated)
+	Lambda ingest (Powertools/DynamoDB idempotency)
+		└─ SQS (events) ──(event source mapping)──> Lambda transform (Parquet)
+			└─ DLQ (optional)
+				└─ S3 (silver/*.parquet) ──> Glue Catalog & Athena (optional) 
+
+```
 
 **No VPC / EC2 / API Gateway required** for the minimal path. API Gateway can be added later for sync APIs if needed.
 
@@ -59,6 +63,7 @@ Lambda ingest (Powertools/DynamoDB idempotency)
 
 ## 📁 Repo Layout
 
+```
 repo-root/
 ├─ README.md
 ├─ ROADMAP.md
@@ -103,6 +108,8 @@ repo-root/
 ├─ main.tf
 ├─ dev.tfvars       # toggles: glue/ge/ops/observability
 └─ *.auto.tfvars.json  # （可选）注入外部 SQS/ARN 等
+
+```
 
 ---
 
@@ -311,12 +318,12 @@ TF_AUTO_APPROVE=1 make tf-destroy
 
 ⸻
 
-📄 Resume-ready blurb (copy-paste)
+📄 blurb 
 
-AWS Serverless ELT Pipeline (v2.0 / Enterprise) — S3 → Lambda → SQS → Lambda → S3 (Parquet)
-Added Step Functions orchestration, Glue Data Catalog/Athena, and a GE data-quality gate.
-Implemented DynamoDB-based idempotency (TTL), DLQ/redrive & replay tooling, and GitHub Actions CI/CD via OIDC.
-→ Production-ready, extensible template: per-dataset scaffold, observable, and recovery-friendly.
+- AWS Serverless ELT Pipeline (v2.0 / Enterprise) — S3 → Lambda → SQS → Lambda → S3 (Parquet)
+- Added Step Functions orchestration, Glue Data Catalog/Athena, and a GE data-quality gate.
+- Implemented DynamoDB-based idempotency (TTL), DLQ/redrive & replay tooling, and GitHub Actions CI/CD via OIDC.
+- Production-ready, extensible template: per-dataset scaffold, observable, and recovery-friendly.
 
 ⸻
 
