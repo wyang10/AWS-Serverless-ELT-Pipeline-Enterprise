@@ -1,11 +1,3 @@
-<!--
- * @Author: Audrey Yang 97855340+wyang10@users.noreply.github.com
- * @Date: 2026-01-02 00:03:56
- * @LastEditors: Audrey Yang 97855340+wyang10@users.noreply.github.com
- * @LastEditTime: 2026-01-02 02:24:49
- * @FilePath: /AWS-Serverless-ELT-Pipeline-Enterprise/README-1.md
- * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
--->
 # AWS Serverless ELT Pipeline — v2.0 (Enterprise-ready)
 
 > 轻量起步，企业化能力随开随用：**S3 → Lambda → SQS → Lambda → S3(Parquet)**，可选编排、目录、质量门禁与可观测性。
@@ -185,18 +177,10 @@ make verify-idempotency
 # End to End Validation
 make verify-e2e
 
-如果你新插入的图片比如 `![](demo/1.png)` 显示不出来，通常是下面原因之一：
+![](demo/1.png)
+![](demo/2.png)
+![](demo/3.png)
 
-- 文件路径不对：GitHub 对路径大小写敏感；而且 `demo/1.png` 必须真的存在（本 repo 里默认是 `demo/0-1.png`、`demo/dataset-scaffold.png` 这类文件名）。
-- 图片还没被 git 跟踪：本地能看到但没 `git add` / `git commit` / `git push`，GitHub 上当然不会有。
-- 文件名有空格/括号/中文：用 `![](<demo/你的文件名 (1).png>)` 这种写法更稳。
-
-建议先跑一键版（会依次执行多步 CLI 验证 + 造数 + 等待 Silver）：
-
-- `make verify-e2e`
-
-![](<demo/0-1.png>)
-![](<demo/0-2.png>)
 
 ⸻
 
@@ -327,10 +311,11 @@ TF_AUTO_APPROVE=1 make tf-destroy
 
 📄 blurb 
 
-- AWS Serverless ELT Pipeline (v2.0 / Enterprise) — S3 → Lambda → SQS → Lambda → S3 (Parquet)
-- Added Step Functions orchestration, Glue Data Catalog/Athena, and a GE data-quality gate.
-- Implemented DynamoDB-based idempotency (TTL), DLQ/redrive & replay tooling, and GitHub Actions CI/CD via OIDC.
-- Production-ready, extensible template: per-dataset scaffold, observable, and recovery-friendly.
+- Shipped a serverless ELT pipeline on AWS: S3 bronze JSONL → Lambda ingest → SQS (+ DLQ) → Lambda transform → S3 silver Parquet.
+- Implemented object-level idempotency using DynamoDB conditional writes + TTL to prevent duplicate ingestion on retries/events.
+- Added operational tooling: Step Functions replay/backfill workflow, SQS DLQ redrive, and one-command dataset scaffolding (`make scaffold DATASET=...`).
+- Enabled “query-ready” silver layer via Glue Data Catalog + Crawler for Athena.
+- Delivered infrastructure as code (Terraform modules) and CI automation (pytest + terraform fmt; manual Terraform plan/apply workflow).
 
 ⸻
 

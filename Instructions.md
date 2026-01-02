@@ -240,7 +240,6 @@ make ge-history
 ```
 
 ## GitHub Actions
-## GitHub Actions
 
 本仓库包含：
 
@@ -276,8 +275,6 @@ ls -la configs/ups_shipping.yaml lambdas/transform/ups_shipping/handler.py dq/up
 ## E2E 验收清单（见截图）
 
 目标：按顺序过一遍就能留存证据。每一步都有「要点 → 命令/控制台路径 → 通过标准（截图）」。
-目标：按顺序过一遍就能留存证据。每一步都有「要点 → 命令/控制台路径 → 通过标准（截图）」。
-
 建议先跑一键版（会依次执行多步 CLI 验证 + 造数 + 等待 Silver）：
 
 - `make verify-e2e`
@@ -291,7 +288,6 @@ ls -la configs/ups_shipping.yaml lambdas/transform/ups_shipping/handler.py dq/up
 - 然后：`export AWS_PROFILE=audrey-tf`
 
 ### 0) Profile / Region
-### 0) Profile / Region
 
 要点：确认当前命令行使用的 AWS 身份与区域。
 
@@ -299,7 +295,6 @@ ls -la configs/ups_shipping.yaml lambdas/transform/ups_shipping/handler.py dq/up
 - 通过：`Account=818466672474`，且 Arn 对应你预期的身份（可为 `user/audrey-tf` 或 Toolkit 登录的 session）。
 ![](<demo/0-我是谁(Profile:Region+Python环境).png>)
 
-### 1) Terraform 
 ### 1) Terraform 
 
 要点：确保 TF 已部署并且能输出关键资源名/ARN。
@@ -311,7 +306,6 @@ ls -la configs/ups_shipping.yaml lambdas/transform/ups_shipping/handler.py dq/up
 
 
 ### 2) S3 （bronze → ingest）
-### 2) S3 （bronze → ingest）
 
 要点：S3 Event notification 指向 ingest Lambda，并且 prefix 为 `bronze/`。
 
@@ -320,14 +314,14 @@ ls -la configs/ups_shipping.yaml lambdas/transform/ups_shipping/handler.py dq/up
 - 通过：事件存在且目标 ARN 为 ingest。
 ![](<demo/2-S3事件触发已就绪(bronze→LambdaIngest).png>)
 
-### 3) Lambda （ingest / transform）
+
 ### 3) Lambda （ingest / transform）
 
 - 命令：`make verify-lambdas`
 - 通过：输出 `OK ingest=...`、`OK transform=...`
 ![](<demo/3-Lambda正常(ingest-transform).png>)
 
-### 4) Idempotency（DynamoDB）+ TTL
+
 ### 4) Idempotency（DynamoDB）+ TTL
 
 要点：本项目幂等粒度是 **S3 对象级别**：`s3://bucket/key#etag`，不是 record/event_id 级别。
@@ -337,13 +331,11 @@ ls -la configs/ups_shipping.yaml lambdas/transform/ups_shipping/handler.py dq/up
 ![](<demo/4-幂等表-DynamoDB-TTL.png>)
 
 ### 5) SQS / DLQ 
-### 5) SQS / DLQ 
 
 - 命令：`make verify-sqs`
 - 通过：主队列消息数接近 0；DLQ 为 0。（消息“最老年龄”属于 CloudWatch 指标，不是 SQS attribute）
 ![](<demo/5-SQS-DLQ健康.png>)
 
-### 6) End to End（S3 → ingest → SQS → transform → Silver）
 ### 6) End to End（S3 → ingest → SQS → transform → Silver）
 
 要点：上传一份 Bronze JSONL 触发整条链路。
@@ -352,7 +344,7 @@ ls -la configs/ups_shipping.yaml lambdas/transform/ups_shipping/handler.py dq/up
 - 通过：上传成功（终端会打印 `s3://<bronze>/<key>`）
 ![](<demo/造数触发E2E(S3-ingest-SQS-transform-Silver).png>)
 
-### 7) Silver → Parquet
+
 ### 7) Silver → Parquet
 
 - 命令：`make verify-silver`
