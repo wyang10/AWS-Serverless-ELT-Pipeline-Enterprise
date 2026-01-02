@@ -1,0 +1,13 @@
+dataset: ups_shipping
+
+# Keep DQ lightweight; you can later map this into GE or Glue checks.
+checks:
+  - type: not_null
+    columns: [event_id, dt]
+  - type: unique
+    columns: [event_id]
+  # - type: range
+  #   column: weight_lb
+  #   min: 0
+  #   max: 200
+

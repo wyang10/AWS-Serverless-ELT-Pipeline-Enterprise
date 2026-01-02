@@ -1,0 +1,38 @@
+dataset: ups_shipping
+
+# S3 prefixes
+bronze_prefix: "bronze/ups_shipping/"
+silver_prefix: "silver/ups_shipping/"
+
+# Idempotency / dedup key
+# Example: "event_id" or "tracking_id" or "tracking_id|event_ts"
+idempotency_key: "event_id"
+
+# Partition strategy for silver (Parquet)
+# Keep it simple: dt=YYYY-MM-DD
+partition_by:
+  - "dt"
+
+# Output schema (silver columns you want)
+# You can add/remove freely — just keep transform aligned.
+output_columns:
+  - event_id
+  - dt
+  - carrier
+  - tracking_number
+  - status
+  - event_ts
+  - raw_source
+
+# Data quality rules (lightweight)
+dq:
+  not_null:
+    - event_id
+    - dt
+  unique:
+    - event_id
+  range:
+    # example numeric fields
+    # weight_lb: [0, 200]
+    {}
+
