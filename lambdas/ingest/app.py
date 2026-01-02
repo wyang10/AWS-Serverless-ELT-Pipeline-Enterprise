@@ -5,21 +5,31 @@ Trigger:
 - S3 ObjectCreated events for Bronze JSON/JSONL objects.
 
 What it does:
-- Uses DynamoDB as a lightweight lock/idempotency table keyed by `s3://bucket/key#etag`.
+- Uses DynamoDB as an idempotency store keyed by the S3 object identity (`bucket/key + etag`).
 - Reads the object, parses JSONL/JSON, normalizes records, and publishes to SQS in batches.
+- Emits structured logs + embedded metrics via AWS Lambda Powertools.
 
 Environment variables:
 - `QUEUE_URL` (required): Destination SQS queue URL.
 - `IDEMPOTENCY_TABLE` (required): DynamoDB table name for object locks.
-- `LOCK_SECONDS` (optional): Lock TTL to avoid duplicate ingestion during retries.
+- `IDEMPOTENCY_TTL_SECONDS` (optional): TTL for idempotency records (default 30 days).
+- `LOCK_SECONDS` (optional, legacy): Backward-compatible alias for `IDEMPOTENCY_TTL_SECONDS`.
 """
 
 from typing import Any, Dict, List, Optional
 
 import boto3
 
+from aws_lambda_powertools import Logger, Metrics
+from aws_lambda_powertools.metrics import MetricUnit
+from aws_lambda_powertools.utilities.idempotency import DynamoDBPersistenceLayer, IdempotencyConfig, idempotent_function
+
 from lambdas.shared.schemas import normalize_record
-from lambdas.shared.utils import env, iter_json_records, json_dumps, log, parse_s3_event_records, utc_epoch
+from lambdas.shared.utils import env, iter_json_records, json_dumps, parse_s3_event_records
+
+
+logger = Logger(service="serverless-elt.ingest")
+metrics = Metrics(namespace="ServerlessELT", service="ingest")
 
 
 def _clients():
@@ -27,59 +37,6 @@ def _clients():
         boto3.client("s3"),
         boto3.client("sqs"),
         boto3.client("dynamodb"),
-    )
-
-
-def _acquire_object_lock(ddb, table_name: str, pk: str, lock_seconds: int) -> bool:
-    now = utc_epoch()
-    exp = now + lock_seconds
-    try:
-        ddb.update_item(
-            TableName=table_name,
-            Key={"pk": {"S": pk}},
-            UpdateExpression="SET #s=:inflight, expires_at=:exp, updated_at=:now ADD attempts :one",
-            ConditionExpression=(
-                "attribute_not_exists(pk) "
-                "OR (#s <> :processed AND (attribute_not_exists(expires_at) OR expires_at < :now))"
-            ),
-            ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={
-                ":inflight": {"S": "INFLIGHT"},
-                ":processed": {"S": "PROCESSED"},
-                ":exp": {"N": str(exp)},
-                ":now": {"N": str(now)},
-                ":one": {"N": "1"},
-            },
-        )
-        return True
-    except ddb.exceptions.ConditionalCheckFailedException:
-        return False
-
-
-def _mark_processed(ddb, table_name: str, pk: str) -> None:
-    now = utc_epoch()
-    ddb.update_item(
-        TableName=table_name,
-        Key={"pk": {"S": pk}},
-        UpdateExpression="SET #s=:processed, updated_at=:now REMOVE expires_at",
-        ExpressionAttributeNames={"#s": "status"},
-        ExpressionAttributeValues={":processed": {"S": "PROCESSED"}, ":now": {"N": str(now)}},
-    )
-
-
-def _mark_error(ddb, table_name: str, pk: str, reason: str) -> None:
-    now = utc_epoch()
-    ddb.update_item(
-        TableName=table_name,
-        Key={"pk": {"S": pk}},
-        UpdateExpression="SET #s=:error, error_reason=:r, expires_at=:past, updated_at=:now",
-        ExpressionAttributeNames={"#s": "status"},
-        ExpressionAttributeValues={
-            ":error": {"S": "ERROR"},
-            ":r": {"S": reason[:500]},
-            ":past": {"N": str(now - 1)},
-            ":now": {"N": str(now)},
-        },
     )
 
 
@@ -114,56 +71,111 @@ def _enqueue_records(sqs, queue_url: str, records: List[Dict[str, Any]]) -> int:
     return sent
 
 
+def _log(event: str, **fields: Any) -> None:
+    logger.info(event, extra=fields)
+
+
+def _cached_response_hook(response: Any, data_record: Any) -> Any:
+    if isinstance(response, dict):
+        return {**response, "cached": True}
+    return {"cached": True, "result": response}
+
+
+def _get_idempotent_processor(table_name: str, ttl_seconds: int, ddb_client: Any, lambda_context: Any):
+    config = IdempotencyConfig(
+        event_key_jmespath="pk",
+        expires_after_seconds=ttl_seconds,
+        response_hook=_cached_response_hook,
+        lambda_context=lambda_context,
+    )
+    persistence = DynamoDBPersistenceLayer(
+        table_name=table_name,
+        key_attr="pk",
+        expiry_attr="expires_at",
+        in_progress_expiry_attr="in_progress_expires_at",
+        status_attr="status",
+        data_attr="data",
+        validation_key_attr="validation",
+        boto3_client=ddb_client,
+    )
+
+    @idempotent_function(data_keyword_argument="item", persistence_store=persistence, config=config)
+    def _process_object(*, item: Dict[str, Any], s3: Any, sqs: Any, queue_url: str) -> Dict[str, Any]:
+        bucket = item["bucket"]
+        key = item["key"]
+        etag = item.get("etag", "")
+        object_id = item["pk"]
+
+        text = _read_s3_text(s3, bucket, key)
+        records: List[Dict[str, Any]] = []
+        dropped = 0
+        for line_no, obj in enumerate(iter_json_records(text), start=1):
+            try:
+                normalized = normalize_record(obj)
+            except Exception as e:
+                dropped += 1
+                _log("ingest_drop_bad_record", object_id=object_id, line_no=line_no, error=str(e))
+                continue
+            normalized["_source"] = {"bucket": bucket, "key": key, "etag": etag, "line_no": line_no}
+            records.append(normalized)
+
+        enq = _enqueue_records(sqs, queue_url, records)
+        _log("ingest_object_done", object_id=object_id, records=len(records), enqueued=enq, dropped=dropped)
+        return {"records": len(records), "enqueued": enq, "dropped": dropped}
+
+    return _process_object
+
+
+@metrics.log_metrics(capture_cold_start_metric=True)
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     queue_url = env("QUEUE_URL")
     table_name = env("IDEMPOTENCY_TABLE")
-    lock_seconds = int(env("LOCK_SECONDS", "900"))
+    ttl_seconds = int(env("IDEMPOTENCY_TTL_SECONDS", env("LOCK_SECONDS", str(30 * 24 * 60 * 60))))
 
     s3, sqs, ddb = _clients()
     objects = parse_s3_event_records(event)
     total_records = 0
     total_enqueued = 0
     skipped = 0
+    dropped = 0
 
-    log("ingest_start", objects=len(objects))
+    metrics.add_metric(name="ObjectsReceived", unit=MetricUnit.Count, value=len(objects))
+    _log("ingest_start", objects=len(objects))
+
+    lambda_context = context if hasattr(context, "get_remaining_time_in_millis") else None
+    process_object = _get_idempotent_processor(table_name=table_name, ttl_seconds=ttl_seconds, ddb_client=ddb, lambda_context=lambda_context)
     for bucket, key, etag in objects:
-        # Idempotency scope is the *S3 object version* (bucket/key + etag), not per record.
-        pk = _object_id(bucket, key, etag)
-        if not _acquire_object_lock(ddb, table_name, pk, lock_seconds=lock_seconds):
+        object_id = _object_id(bucket, key, etag)
+        item = {"pk": object_id, "bucket": bucket, "key": key, "etag": etag}
+        try:
+            result = process_object(item=item, s3=s3, sqs=sqs, queue_url=queue_url)
+        except Exception as e:
+            _log("ingest_object_error", object_id=object_id, error=str(e))
+            raise
+
+        if isinstance(result, dict) and result.get("cached") is True:
             skipped += 1
-            log("ingest_skip_idempotent", pk=pk)
+            metrics.add_metric(name="ObjectsSkippedIdempotent", unit=MetricUnit.Count, value=1)
+            _log("ingest_skip_idempotent", object_id=object_id)
             continue
 
-        try:
-            # Read the source object, parse JSONL lines, and normalize into a canonical schema.
-            text = _read_s3_text(s3, bucket, key)
-            records: List[Dict[str, Any]] = []
-            for line_no, obj in enumerate(iter_json_records(text), start=1):
-                try:
-                    normalized = normalize_record(obj)
-                except Exception as e:
-                    log("ingest_drop_bad_record", pk=pk, line_no=line_no, error=str(e))
-                    continue
-                normalized["_source"] = {"bucket": bucket, "key": key, "etag": etag, "line_no": line_no}
-                records.append(normalized)
+        total_records += int(result.get("records", 0))
+        total_enqueued += int(result.get("enqueued", 0))
+        dropped += int(result.get("dropped", 0))
 
-            total_records += len(records)
-            # Batch send to SQS (max 10 entries per batch).
-            enq = _enqueue_records(sqs, queue_url, records)
-            total_enqueued += enq
-            _mark_processed(ddb, table_name, pk)
-            log("ingest_object_done", pk=pk, records=len(records), enqueued=enq)
-        except Exception as e:
-            # Mark error and re-raise so the invocation is considered failed (visible in logs/metrics).
-            _mark_error(ddb, table_name, pk, reason=str(e))
-            log("ingest_object_error", pk=pk, error=str(e))
-            raise
+    metrics.add_metric(name="RecordsEnqueued", unit=MetricUnit.Count, value=total_enqueued)
+    metrics.add_metric(name="RecordsParsed", unit=MetricUnit.Count, value=total_records)
+    if dropped:
+        metrics.add_metric(name="RecordsDropped", unit=MetricUnit.Count, value=dropped)
+    if skipped:
+        metrics.add_metric(name="ObjectsSkippedIdempotent", unit=MetricUnit.Count, value=skipped)
 
     return {
         "objects": len(objects),
         "records": total_records,
         "enqueued": total_enqueued,
         "skipped": skipped,
+        "dropped": dropped,
         "request_id": getattr(context, "aws_request_id", None),
     }
 

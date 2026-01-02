@@ -11,11 +11,11 @@
 > 轻量起步，企业化能力随开随用：**S3 → Lambda → SQS → Lambda → S3(Parquet)**，可选编排、目录、质量门禁与可观测性。
 
 This v2.0 elevates the minimal v1 into a **production-ready, enterprise-style** framework:
-- **Orchestration:** EventBridge → Step Functions → Glue Job (+ optional **Great Expectations** gate)
-- **Catalog / Query:** Glue Data Catalog + Crawler + Athena tables for **silver/** Parquet
-- **Replay / Recovery:** `replay` & `dlq-redrive` scripts for backfill and poison-message recovery
-- **Idempotency:** DynamoDB TTL for object-level dedup, optional GSI for audit
-- **CI/CD:** GitHub Actions pipelines (Lambda build+deploy, Terraform plan+apply) via **OIDC** (no long-lived keys)
+- **Orchestration (optional):** EventBridge → Step Functions → Glue Job (+ optional **Great Expectations** gate)
+- **Catalog / Query (optional):** Glue Data Catalog + Crawler + Athena tables for **silver/** Parquet
+- **Replay / Recovery:** `replay` & `redrive` scripts for backfill and poison-message recovery
+- **Idempotency:** Object-level dedup via DynamoDB TTL (Powertools Idempotency)
+- **CI/CD:** GitHub Actions CI (pytest + terraform fmt) + manual Terraform plan/apply (supports keys/OIDC)
 
 ---
 
@@ -25,10 +25,10 @@ This v2.0 elevates the minimal v1 into a **production-ready, enterprise-style** 
 
 S3 (bronze/*.jsonl)
   └─(ObjectCreated)
-	Lambda ingest (Powertools/DynamoDB idempotency)
-		└─ SQS (events) ──(event source mapping)──> Lambda transform (Parquet)
-			└─ DLQ (optional)
-				└─ S3 (silver/*.parquet) ──> Glue Catalog & Athena (optional) 
+     Lambda ingest (Powertools logging/metrics + DynamoDB idempotency)
+        └─ SQS (events) ──(event source mapping)──> Lambda transform (Parquet)
+              └─ DLQ (optional)
+                                └─ S3 (silver/*.parquet) ──> (optional) Glue Catalog & Athena
 
 ```
 
@@ -42,10 +42,10 @@ S3 (bronze/*.jsonl)
 |---|---|---|
 | Pipeline | S3→Lambda→SQS→Lambda→S3 | Same + Step Functions orchestration |
 | Storage | JSONL → Parquet | Parquet + Glue tables for Athena |
-| Idempotency | DDB basic | DDB TTL + optional GSI for audit |
-| Replay / DLQ | Manual | `scripts/replay*.sh`, `scripts/dlq-redrive.sh` |
+| Idempotency | DDB object-level lock | Powertools Idempotency (DynamoDB TTL) + replay/backfill |
+| Replay / DLQ | Manual | `scripts/replay.sh`, `scripts/redrive.sh` |
 | Observability | Logs only | (optional) CloudWatch Dashboards + Alarms |
-| CI/CD | Manual apply | GitHub Actions (OIDC), terraform plan/apply |
+| CI/CD | Manual apply | GitHub Actions CI + manual terraform plan/apply (keys/OIDC) |
 | DQ | – | Glue Job + optional Great Expectations gate |
 
 ---
@@ -73,7 +73,7 @@ repo-root/
 │  ├─ gen_fake_events.py
 │  ├─ replay_from_s3.py         # S3→SQS 直推 (需要 sqs:SendMessage)
 │  ├─ replay.sh                 # S3 copy 到新的 bronze/ 前缀（推荐，无需 SQS 发信权限）
-│  ├─ dlq-redrive.sh            # SQS 原生 redrive
+│  ├─ redrive.sh                # SQS 原生 redrive
 │  └─ scaffold.sh               # 生成 dataset 骨架
 ├─ configs/                     # 每个 dataset 的元配置
 ├─ dq/                          # 轻量 DQ 规则（或映射到 GE）
@@ -184,10 +184,18 @@ make verify-idempotency
 
 # End to End Validation
 make verify-e2e
+### 🖼️ README 图片显示不出来？
 
-![](demo/1.png)
-![](demo/2.png)
-![](demo/3.png)
+如果你新插入的图片比如 `![](demo/1.png)` 显示不出来，通常是下面原因之一：
+
+- 文件路径不对：GitHub 对路径大小写敏感；而且 `demo/1.png` 必须真的存在（本 repo 里默认是 `demo/0-1.png`、`demo/dataset-scaffold.png` 这类文件名）。
+- 图片还没被 git 跟踪：本地能看到但没 `git add` / `git commit` / `git push`，GitHub 上当然不会有。
+- 文件名有空格/括号/中文：用 `![](<demo/你的文件名 (1).png>)` 这种写法更稳。
+
+建议先跑一键版（会依次执行多步 CLI 验证 + 造数 + 等待 Silver）：
+
+- `make verify-e2e`
+
 ![](<demo/0-1.png>)
 ![](<demo/0-2.png>)
 
@@ -195,7 +203,7 @@ make verify-e2e
 
 🧪 Idempotency Model
 	•	Scope: S3 object-level (bucket/key#etag)
-	•	Store: DynamoDB with TTL（可选 GSI：审计与快速查询）
+	•	Store: DynamoDB with TTL (Powertools Idempotency)
 	•	SQS consumer: partial batch failure + DLQ redrive 脚本
 
 ⸻
@@ -330,4 +338,3 @@ TF_AUTO_APPROVE=1 make tf-destroy
 License
 
 MIT
-

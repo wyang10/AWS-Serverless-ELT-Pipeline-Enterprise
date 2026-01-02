@@ -38,28 +38,8 @@ def test_ingest_enqueues_and_marks_processed(monkeypatch):
         ]
     }
 
-    # Acquire lock
-    ddb_stubber.add_response(
-        "update_item",
-        {},
-        {
-            "TableName": "tbl",
-            "Key": {"pk": {"S": "s3://bronze-bucket/bronze/shipments/a.jsonl#etag1"}},
-            "UpdateExpression": "SET #s=:inflight, expires_at=:exp, updated_at=:now ADD attempts :one",
-            "ConditionExpression": (
-                "attribute_not_exists(pk) "
-                "OR (#s <> :processed AND (attribute_not_exists(expires_at) OR expires_at < :now))"
-            ),
-            "ExpressionAttributeNames": {"#s": "status"},
-                "ExpressionAttributeValues": {
-                    ":inflight": {"S": "INFLIGHT"},
-                    ":processed": {"S": "PROCESSED"},
-                    ":exp": {"N": ANY},
-                    ":now": {"N": ANY},
-                    ":one": {"N": "1"},
-                },
-            },
-        )
+    # Powertools idempotency: save_inprogress is a conditional PutItem (no need to validate params here).
+    ddb_stubber.add_response("put_item", {}, None)
 
     s3_stubber.add_response(
         "get_object",
@@ -73,21 +53,22 @@ def test_ingest_enqueues_and_marks_processed(monkeypatch):
         {"QueueUrl": "https://sqs.example/123/q", "Entries": [{"Id": "0", "MessageBody": ANY}]},
     )
 
-    # Mark processed
-    ddb_stubber.add_response(
-        "update_item",
-        {},
-        {
-            "TableName": "tbl",
-            "Key": {"pk": {"S": "s3://bronze-bucket/bronze/shipments/a.jsonl#etag1"}},
-            "UpdateExpression": "SET #s=:processed, updated_at=:now REMOVE expires_at",
-            "ExpressionAttributeNames": {"#s": "status"},
-            "ExpressionAttributeValues": {":processed": {"S": "PROCESSED"}, ":now": {"N": ANY}},
-        },
-    )
+    # Powertools idempotency: save_success updates the record (no need to validate params).
+    ddb_stubber.add_response("update_item", {}, None)
 
     with s3_stubber, sqs_stubber, ddb_stubber:
-        resp = ingest.handler(event, context=type("C", (), {"aws_request_id": "r1"})())
+        resp = ingest.handler(
+            event,
+            context=type(
+                "C",
+                (),
+                {
+                    "aws_request_id": "r1",
+                    "function_name": "serverless-elt-ingest",
+                    "get_remaining_time_in_millis": lambda self: 10000,
+                },
+            )(),
+        )
 
     assert resp["objects"] == 1
     assert resp["records"] == 1
@@ -116,32 +97,34 @@ def test_ingest_skips_when_lock_not_acquired(monkeypatch):
     }
 
     ddb_stubber = Stubber(ddb)
+    # Simulate "already completed":
+    # - Conditional put fails (no old item returned)
+    # - Powertools idempotency falls back to GetItem and returns cached response
     ddb_stubber.add_client_error(
-        "update_item",
+        "put_item",
         service_error_code="ConditionalCheckFailedException",
         service_message="condition failed",
         http_status_code=400,
-        expected_params={
-            "TableName": "tbl",
-            "Key": {"pk": {"S": "s3://bronze-bucket/bronze/shipments/a.jsonl#etag1"}},
-            "UpdateExpression": "SET #s=:inflight, expires_at=:exp, updated_at=:now ADD attempts :one",
-            "ConditionExpression": (
-                "attribute_not_exists(pk) "
-                "OR (#s <> :processed AND (attribute_not_exists(expires_at) OR expires_at < :now))"
-            ),
-            "ExpressionAttributeNames": {"#s": "status"},
-            "ExpressionAttributeValues": {
-                ":inflight": {"S": "INFLIGHT"},
-                ":processed": {"S": "PROCESSED"},
-                ":exp": {"N": ANY},
-                ":now": {"N": ANY},
-                ":one": {"N": "1"},
-            },
+        expected_params=None,
+    )
+    ddb_stubber.add_response(
+        "get_item",
+        {
+            "Item": {
+                "pk": {"S": "some-key"},
+                "expires_at": {"N": "9999999999"},
+                "status": {"S": "COMPLETED"},
+                "data": {"S": "{\"records\":1,\"enqueued\":1,\"dropped\":0}"},
+            }
         },
+        None,
     )
 
     with ddb_stubber:
-        resp = ingest.handler(event, context=None)
+        resp = ingest.handler(
+            event,
+            context=type("C", (), {"function_name": "serverless-elt-ingest", "get_remaining_time_in_millis": lambda self: 10000})(),
+        )
 
     assert resp["skipped"] == 1
     assert resp["records"] == 0

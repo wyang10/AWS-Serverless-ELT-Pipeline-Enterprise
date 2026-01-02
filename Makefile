@@ -86,6 +86,7 @@ build-transform:
 	cp -R lambdas/transform/__init__.py $(BUILD_DIR)/transform/lambdas/transform/__init__.py
 	cp -R lambdas/shared $(BUILD_DIR)/transform/lambdas/shared
 	find $(BUILD_DIR)/transform -type d -name '__pycache__' -prune -exec rm -rf {} +
+	$(PY) -m pip install -r lambdas/transform/requirements-build.txt --target $(BUILD_DIR)/transform --upgrade
 	cd $(BUILD_DIR)/transform && zip -qr ../transform.zip .
 
 build-ops-replay:
