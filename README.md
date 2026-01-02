@@ -258,11 +258,11 @@ make ge-status
 
 🧯 Replay / Recovery
 	•	S3-copy replay（推荐）：无需 sqs:SendMessage，触发同一条 S3→ingest→SQS 路径。
-	scripts/replay.sh s3://$BRONZE/bronze/shipments/ bronze/replay/$(date -u +%Y%m%dT%H%M%SZ)/
+	./scripts/replay.sh 2026-01-01T00:00:00Z 2026-01-02T00:00:00Z bronze/shipments/
 	•	Direct SQS replay：需要队列上的 sqs:SendMessage。
 	python3 scripts/replay_from_s3.py --bucket "$BRONZE" --prefix bronze/shipments/ --queue-url "$(terraform -chdir=infra/terraform/envs/dev output -raw queue_url)"
 	•	DLQ redrive（SQS 原生）：
-	scripts/dlq-redrive.sh
+	./scripts/redrive.sh
 
 ⸻
 
@@ -320,9 +320,9 @@ TF_AUTO_APPROVE=1 make tf-destroy
 🗺️ Changelog v2.0
 	1.	触发编排：EventBridge → Step Functions（DQ 阶段），Task 跑 Glue Job（可选接 GE）
 	2.	可查询终点：注册 Glue Catalog + Athena 表（silver/*.parquet）
-	3.	回放闭环：dlq-redrive.sh + replay.sh/replay_from_s3.py
-	4.	幂等细节：DynamoDB TTL 开启 & 支持按 event_id 查询（可加 GSI 审计）
-	5.	CI/CD：GitHub Actions（lambda build+deploy、tf plan+apply），OIDC 无明文密钥
+	3.	回放闭环：`scripts/replay.sh` / `scripts/replay_from_s3.py` + `scripts/redrive.sh`（DLQ → 主队列）
+	4.	幂等细节：对象级幂等（S3 bucket/key#etag），Powertools Idempotency + DynamoDB TTL
+	5.	CI/CD：GitHub Actions（pytest + terraform fmt；手动触发 terraform plan/apply；支持 keys/OIDC）
 
 ⸻
 
