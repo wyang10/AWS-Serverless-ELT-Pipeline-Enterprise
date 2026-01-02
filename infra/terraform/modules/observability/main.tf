@@ -28,6 +28,11 @@ variable "dlq_name" {
   default = null
 }
 
+variable "dlq_enabled" {
+  type    = bool
+  default = false
+}
+
 variable "notification_topic_arn" {
   type    = string
   default = null
@@ -103,7 +108,7 @@ resource "aws_cloudwatch_metric_alarm" "queue_age" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "dlq_messages" {
-  count               = var.enabled && var.dlq_name != null ? 1 : 0
+  count               = var.enabled && var.dlq_enabled ? 1 : 0
   alarm_name          = "${var.name_prefix}-dlq-messages"
   alarm_description   = "DLQ has visible messages"
   comparison_operator = "GreaterThanOrEqualToThreshold"
@@ -174,7 +179,7 @@ resource "aws_cloudwatch_dashboard" "this" {
           title   = "SQS DLQ — Visible (if configured)"
           view    = "timeSeries"
           stacked = false
-          metrics = var.dlq_name != null ? [
+          metrics = var.dlq_enabled ? [
             ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", var.dlq_name],
             [".", "ApproximateAgeOfOldestMessage", ".", var.dlq_name],
           ] : []
@@ -187,4 +192,3 @@ resource "aws_cloudwatch_dashboard" "this" {
 output "dashboard_name" {
   value = var.enabled ? aws_cloudwatch_dashboard.this[0].dashboard_name : null
 }
-
