@@ -125,7 +125,7 @@ cd AWS-Serverless-ELT-Pipeline-Enterprise
 git checkout v2.0
 ```
 
-### 1) Python 虚拟环境 + 依赖
+### 1) Python ENV + Dependencies
 
 ```bash
 python3 -m venv .venv
@@ -238,12 +238,12 @@ make ge-status
 make ge-history
 ```
 
-## GitHub Actions（更像企业交付）
+## GitHub Actions
 
 本仓库包含：
 
 - `.github/workflows/ci.yml`：`pytest` + `terraform fmt -check`
-- `.github/workflows/terraform-manual.yml`：手动触发的 `plan/apply/destroy`（企业版工作流）
+- `.github/workflows/terraform-manual.yml`：手动触发的 `plan/apply/destroy`（工作流）
 
 ### terraform-manual：先配 Secrets 再运行
 
@@ -272,7 +272,7 @@ ls -la configs/ups_shipping.yaml lambdas/transform/ups_shipping/handler.py dq/up
 
 ## E2E 验收清单（见截图）
 
-目标：按顺序过一遍就能留存证据。每一步都有「要点 → 命令/控制台路径 → 通过标准（截图点）」。
+目标：按顺序过一遍就能留存证据。每一步都有「要点 → 命令/控制台路径 → 通过标准（截图）」。
 
 建议先跑一键版（会依次执行多步 CLI 验证 + 造数 + 等待 Silver）：
 
@@ -286,112 +286,101 @@ ls -la configs/ups_shipping.yaml lambdas/transform/ups_shipping/handler.py dq/up
 - `make profile-audrey-tf`
 - 然后：`export AWS_PROFILE=audrey-tf`
 
-### 0) 我是谁（Profile/Region）
+### 0) Profile / Region
 
 要点：确认当前命令行使用的 AWS 身份与区域。
 
 - 命令：`make verify-whoami`
 - 通过：`Account=818466672474`，且 Arn 对应你预期的身份（可为 `user/audrey-tf` 或 Toolkit 登录的 session）。
-- 截图：终端输出整块（含 `AWS_PROFILE` / `AWS_REGION`）。
 ![](<demo/0-我是谁(Profile:Region+Python环境).png>)
 
-### 1) Terraform 输出就绪
+### 1) Terraform 
 
 要点：确保 TF 已部署并且能输出关键资源名/ARN。
 
 - 命令：`make verify-tf-outputs`
 - 通过：输出里至少包含 `bronze_bucket` / `silver_bucket` / `queue_url` / `ingest_lambda` / `transform_lambda`。
-- 截图：终端 output。
 ![](<demo/1-Terraform用对了身份+Region.png>)
 ![](<demo/1-Terraform用对了身份+Region-2.png>)
 
 
-### 2) S3 事件触发已就绪（bronze → ingest）
+### 2) S3 （bronze → ingest）
 
 要点：S3 Event notification 指向 ingest Lambda，并且 prefix 为 `bronze/`。
 
 - 命令：`make verify-s3-notifications`
 - 控制台：S3 → `<bronze_bucket>` → Properties → Event notifications
 - 通过：事件存在且目标 ARN 为 ingest。
-- 截图：控制台 Event notification 卡片（或终端 table 输出）。
 ![](<demo/2-S3事件触发已就绪(bronze→LambdaIngest).png>)
 
-### 3) Lambda 存在且可读（ingest / transform）
+### 3) Lambda （ingest / transform）
 
 - 命令：`make verify-lambdas`
 - 通过：输出 `OK ingest=...`、`OK transform=...`
-- 截图：终端输出；控制台 Lambda → Monitor → Logs
 ![](<demo/3-Lambda正常(ingest-transform).png>)
 
-### 4) 幂等表（DynamoDB）与 TTL（对象级别）
+### 4) Idempotency（DynamoDB）+ TTL
 
 要点：本项目幂等粒度是 **S3 对象级别**：`s3://bucket/key#etag`，不是 record/event_id 级别。
 
 - 命令：`make verify-ddb`
 - 通过：TTL `ENABLED`；scan 能看到 `pk/status` 等字段。
-- 截图：终端 TTL 输出 + scan 输出（前几条）。
 ![](<demo/4-幂等表-DynamoDB-TTL.png>)
 
-### 5) SQS / DLQ 健康
+### 5) SQS / DLQ 
 
 - 命令：`make verify-sqs`
 - 通过：主队列消息数接近 0；DLQ 为 0。（消息“最老年龄”属于 CloudWatch 指标，不是 SQS attribute）
-- 截图：终端 `get-queue-attributes` 输出； SQS 控制台 Monitoring 图表。
 ![](<demo/5-SQS-DLQ健康.png>)
 
-### 6) 造数触发 E2E（S3 → ingest → SQS → transform → Silver）
+### 6) End to End（S3 → ingest → SQS → transform → Silver）
 
 要点：上传一份 Bronze JSONL 触发整条链路。
 
 - 命令：`make verify-seed`（会把本次上传写入 `$(E2E_LAST_SEED_FILE)`）
 - 通过：上传成功（终端会打印 `s3://<bronze>/<key>`）
-- 截图：终端输出 + S3 控制台里该对象 Key
 ![](<demo/造数触发E2E(S3-ingest-SQS-transform-Silver).png>)
 
-### 7) Silver 产出 Parquet（等待窗口）
+### 7) Silver → Parquet
 
 - 命令：`make verify-silver`
 - 通过：最近 `$(VERIFY_WINDOW_MINUTES)` 分钟内能观测到 `silver/shipments/` 下新增 parquet。
-- 截图：终端 OK 输出；或 S3 控制台显示 parquet 文件列表。
 ![](<demo/6-造数触发整条链路(S3→ingest→SQS→transform→Silver).png>)
 
-### 8) 幂等验收（同一对象重复触发会被跳过）
+### 8) Idempotency Validation - Exactly Once
 
 要点：为了避免 S3 自动触发干扰，这一步会把对象上传到 `$(E2E_IDEMPOTENCY_PREFIX)/...`（不匹配 `bronze/` 通知），然后手动 invoke ingest 两次，第二次应 `skipped>=1`。
 
 - 命令：`make verify-idempotency`
 - 通过：第二次 invoke 输出里 `skipped>=1`，并打印 `OK: second invoke skipped`。
-- 截图：终端 first/second 两段输出。
 ![](<demo/7-幂等验收-profile-key-lambda-invoke.png>)
 
-### 9) Glue / Athena（可选）
+### 9) Glue / Athena
 
 前提：`glue_enabled=true`。
 
 - 命令：`make verify-glue`
 - 通过：crawler `LastCrawl=SUCCEEDED`；能看到 database 名称。
-- 截图：Glue 控制台表结构页 + Athena 查询结果（见下方 “Athena quick queries”）。
 ![](<demo/8-GlueCatalog-Athena可查询.png>)
 ![](<demo/Athena.png>)
 
-### 10) GE 质量门禁（可选）
+### 10) Great Expectations Quality Gate
+
 
 前提：`ge_enabled=true` 且 `ge_workflow_enabled=true`。
 
 - 命令：`make verify-ge`（列出最近执行；手动触发用 `make ge-start`）
 - 通过：能看到最近的 executions；或至少 state machine 存在。
-- 截图：Step Functions execution 详情（Glue task 绿勾）或终端 list-executions 输出。
 ![](<demo/9-质量门禁-StepFunctions-GlueGEJob.png>)
 ![](<demo/step-function-1.png>)
 ![](<demo/step-function-2.png>)
 
-### 11) CloudWatch Dashboard（可选）
+### 11) CloudWatch Dashboard
 
 前提：`observability_enabled=true` 且账号允许 `cloudwatch:PutDashboard`。
 
 - 命令：`make verify-observability`
 - 通过：输出 `OK dashboard=...`
-- 截图：CloudWatch Dashboard 预览页。
 
 ## Quickstart (dev)
 
