@@ -71,6 +71,9 @@ locals {
   queue_arn = local.use_external_queue ? var.existing_queue_arn : module.queue[0].arn
   dlq_url   = local.use_external_queue ? var.existing_dlq_url : module.queue[0].dlq_url
   dlq_arn   = local.use_external_queue ? var.existing_dlq_arn : module.queue[0].dlq_arn
+  dlq_enabled = local.use_external_queue ? (
+    var.existing_dlq_arn != null && var.existing_dlq_arn != ""
+  ) : true
 }
 
 locals {
@@ -171,6 +174,7 @@ module "observability" {
   transform_lambda_name  = module.transform_lambda.name
   queue_name             = local.queue_name
   dlq_name               = local.dlq_name
+  dlq_enabled            = local.dlq_enabled
   notification_topic_arn = var.alarm_notification_topic_arn
   tags                   = local.tags
 }
