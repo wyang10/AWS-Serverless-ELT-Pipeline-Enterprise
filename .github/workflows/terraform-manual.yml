@@ -98,6 +98,19 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: us-east-2
 
+      - name: Preflight SQS tag permission (ListQueueTags)
+        run: |
+          set -euo pipefail
+          # Terraform AWS provider reads SQS tags during refresh/create.
+          # Some org policies allow CreateQueue but deny ListQueueTags; fail early with a clear hint.
+          QURL="https://sqs.us-east-2.amazonaws.com/000000000000/perm-check-does-not-exist"
+          out="$(aws sqs list-queue-tags --region us-east-2 --queue-url "$QURL" 2>&1 || true)"
+          if echo "$out" | grep -qi 'AccessDenied'; then
+            echo "::error::Missing permission sqs:ListQueueTags. Add it to your IAM policy, or use an externally-managed queue via infra/terraform/envs/dev/queue.auto.tfvars.json."
+            exit 1
+          fi
+          echo "OK: sqs:ListQueueTags appears allowed (non-existent queue is expected)."
+
       - name: Build lambda artifacts (required for plan/apply)
         run: |
           python -m pip install --upgrade pip
