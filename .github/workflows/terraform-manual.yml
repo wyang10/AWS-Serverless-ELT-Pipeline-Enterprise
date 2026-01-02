@@ -3,6 +3,14 @@ name: terraform-manual
 on:
   workflow_dispatch:
     inputs:
+      auth:
+        description: "AWS auth method"
+        required: true
+        default: keys
+        type: choice
+        options:
+          - keys
+          - oidc
       action:
         description: "What to run"
         required: true
@@ -46,14 +54,14 @@ jobs:
         uses: hashicorp/setup-terraform@v3
 
       - name: Configure AWS credentials (OIDC)
-        if: ${{ secrets.AWS_ROLE_TO_ASSUME != '' }}
+        if: ${{ inputs.auth == 'oidc' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: us-east-2
 
       - name: Configure AWS credentials (access keys)
-        if: ${{ secrets.AWS_ROLE_TO_ASSUME == '' }}
+        if: ${{ inputs.auth == 'keys' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}

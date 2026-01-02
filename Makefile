@@ -9,6 +9,7 @@ BUILD_DIR ?= build
 TF_BACKEND_CONFIG ?=
 TF_AUTO_APPROVE ?= 0
 AWS_REGION ?= us-east-2
+export AWS_PAGER ?=
 
 OPS_SRC_PREFIX ?= bronze/shipments/manual/
 OPS_DEST_PREFIX_BASE ?= bronze/replay/manual
