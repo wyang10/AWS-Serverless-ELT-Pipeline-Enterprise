@@ -184,7 +184,6 @@ make verify-idempotency
 
 # End to End Validation
 make verify-e2e
-### 🖼️ README 图片显示不出来？
 
 如果你新插入的图片比如 `![](demo/1.png)` 显示不出来，通常是下面原因之一：
 
