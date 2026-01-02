@@ -183,11 +183,11 @@ make verify-seed && make verify-silver
 make verify-idempotency
 
 # End to End Validation
-- `make verify-e2e`
+make verify-e2e
 
-![](<demo/1.png>)
-![](<demo/2.png>)
-![](<demo/3.png>)
+![](demo/1.png)
+![](demo/2.png)
+![](demo/3.png)
 
 ⸻
 
@@ -201,13 +201,14 @@ make verify-idempotency
 📚 Catalog & Query (optional)
 
 Enable Glue DB + Crawler（并供 Athena 查询）：
-	1.	infra/terraform/envs/dev/dev.tfvars：
+
+1. infra/terraform/envs/dev/dev.tfvars：
 
 glue_enabled = true
 # glue_silver_prefix = "silver/"
 # glue_table_prefix  = "silver_"
 
-	2.	部署：
+2. 部署：
 
 TF_AUTO_APPROVE=1 make tf-apply
 make glue-crawler-start
@@ -246,19 +247,18 @@ make ge-status
 ⸻
 
 🧯 Replay / Recovery
+
 	•	S3-copy replay（推荐）：无需 sqs:SendMessage，触发同一条 S3→ingest→SQS 路径。
 
-scripts/replay.sh s3://$BRONZE/bronze/shipments/ bronze/replay/$(date -u +%Y%m%dT%H%M%SZ)/
-
+	scripts/replay.sh s3://$BRONZE/bronze/shipments/ bronze/replay/$(date -u +%Y%m%dT%H%M%SZ)/
 
 	•	Direct SQS replay：需要队列上的 sqs:SendMessage。
 
-python3 scripts/replay_from_s3.py --bucket "$BRONZE" --prefix bronze/shipments/ --queue-url "$(terraform -chdir=infra/terraform/envs/dev output -raw queue_url)"
-
+	python3 scripts/replay_from_s3.py --bucket "$BRONZE" --prefix bronze/shipments/ --queue-url "$(terraform -chdir=infra/terraform/envs/dev output -raw queue_url)"
 
 	•	DLQ redrive（SQS 原生）：
 
-scripts/dlq-redrive.sh
+	scripts/dlq-redrive.sh
 
 
 
