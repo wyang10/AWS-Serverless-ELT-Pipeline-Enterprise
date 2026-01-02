@@ -1,34 +1,19 @@
-# AWS Serverless ELT Pipeline (Enterprise track) — v2.0
+# AWS Serverless ELT Pipeline (v2.0) — production-lite, enterprise features by toggles
 
-This repo is the **v2.0 / enterprise-ish track**. It starts from the v1 minimal serverless ELT and adds orchestration, catalog, and data quality.
+> 轻量起步，企业化能力随开随用：**S3 → Lambda → SQS → Lambda → S3 (Parquet)**，可选编排、目录、质量门禁与可观测性。
 
-- v1 (minimal): S3 → Lambda → SQS → Lambda → S3 Parquet
-- v2.0 (this repo): v1 + Step Functions ops workflow + Glue Catalog/Crawler + Glue Jobs + Great Expectations quality gate
+This repo keeps the **minimal pipeline** as the default backbone, then layers optional “enterprise-ish” modules:
 
-Planned rollout: `ROADMAP.md`.
+- **Core pipeline**: S3 (bronze JSON/JSONL) → Lambda ingest (object-level idempotency) → SQS (+ DLQ) → Lambda transform → S3 (silver Parquet)
+- **Orchestration (optional)**: Step Functions ops workflow for replay/backfill/quality polling (`make ops-start`)
+- **Catalog / Query (optional)**: Glue Data Catalog + Crawler so Athena can query `silver/` as tables
+- **Quality gate (optional)**: Glue Job + Step Functions (with optional auto-trigger via EventBridge)
+- **Observability (optional)**: CloudWatch dashboard + alarms
+- **Extensibility**: `make scaffold DATASET=<name>` generates dataset config/handler/DQ/sample skeleton
 
----
+Roadmap: `ROADMAP.md`.
 
-# AWS Serverless ELT Pipeline — S3 → Lambda → SQS → Lambda → S3 (Production-lite)
-
-## An intentionally lite version of end to end serverless pipeline:
-
-- **Bronze (raw)**: `S3` JSON/JSONL
-- **Ingest**: `Lambda` (object-level idempotency via DynamoDB) → `SQS`
-- **Transform**: `Lambda` (batch from SQS; partial batch failure) → **Silver** `S3` (**Parquet**)
-
-### Scope 
-- No dependency on VPC/EC2.
-- API Gateway not used in the minimal build.
-
-## Intro
-
-- Built a production-lite serverless ELT pipeline on AWS: S3 (bronze JSON/JSONL) → Lambda (idempotent ingest) → SQS → Lambda (batch transform) → S3 (silver Parquet).
-- Implemented S3 object-level idempotency using DynamoDB conditional writes + TTL to prevent duplicate ingestion on retries/events.
-- Designed resilient SQS processing with Lambda partial batch failure reporting and DLQ redrive for poisoned messages.
-- Delivered infra-as-code with Terraform modules and reproducible build/deploy workflow.
-
-## Architecture
+## 🧩 Architecture
 
 ```
 S3 (bronze/*.jsonl)
@@ -39,14 +24,48 @@ S3 (bronze/*.jsonl)
                                 └─ S3 (silver/*.parquet)
 ```
 
-## v1 vs v2.0 highlights
+## 🔁 v1 vs v2.0 (what changed)
 
-- **v1** focuses on the core pipeline and idempotent ingestion.
-- **v2.0** adds “enterprise-ish” operability:
-  - Step Functions **ops workflow** for replay/backfill + quality polling (`make ops-start`)
-  - Glue **Data Catalog + Crawler** so Athena can query Silver as tables
-  - Glue **compaction/recompute job** (safe outputs to a separate prefix)
-  - Great Expectations **quality gate** implemented as a Glue job orchestrated by Step Functions
+| Aspect | v1 (Minimal) | v2.0 (Enterprise-ish) |
+|---|---|---|
+| Pipeline | S3 → Lambda → SQS → Lambda → S3 | Same + optional orchestration |
+| Idempotency | DynamoDB TTL (object-level) | Same + replay/backfill workflows |
+| Failure handling | SQS + DLQ | Same + redrive helpers |
+| Storage | JSONL → Parquet | Same + optional compaction job |
+| Queryability | S3 only | Glue Catalog/Crawler + Athena tables |
+| Observability | Logs | Optional CloudWatch dashboard + alarms |
+| Data quality | — | Optional quality gate (Glue Job + Step Functions) |
+| Delivery | Local apply | GitHub Actions: CI + manual plan/apply (supports keys/OIDC) |
+
+## 💼 Resume / Interview snippets (pick one)
+
+<details>
+<summary>1-liner (LinkedIn / top of resume)</summary>
+
+Built a production-lite serverless ELT framework on AWS (**S3 → Lambda → SQS → Lambda → S3 Parquet**) with optional orchestration, catalog, replay, and quality gating.
+
+</details>
+
+<details>
+<summary>Resume bullets (3–5 bullets)</summary>
+
+- Shipped a serverless ELT pipeline on AWS: S3 bronze JSONL → Lambda ingest → SQS (+ DLQ) → Lambda transform → S3 silver Parquet.
+- Implemented object-level idempotency using DynamoDB conditional writes + TTL to prevent duplicate ingestion on retries/events.
+- Added operational tooling: Step Functions replay/backfill workflow, SQS DLQ redrive, and one-command dataset scaffolding (`make scaffold DATASET=...`).
+- Enabled “query-ready” silver layer via Glue Data Catalog + Crawler for Athena.
+- Delivered infrastructure as code (Terraform modules) and CI automation (pytest + terraform fmt; manual Terraform plan/apply workflow).
+
+</details>
+
+<details>
+<summary>Interview story (structured)</summary>
+
+- Problem: Needed a simple but robust pipeline for JSONL → Parquet without VPC/EC2, yet with real-world operability.
+- Design: S3 event-driven ingest + SQS decoupling + batch transform to partitioned Parquet; add idempotency at the S3 object level.
+- Reliability: Partial batch failure handling + DLQ + redrive; replay/backfill via Step Functions and S3-copy re-triggering.
+- Operability: CloudWatch dashboard/alarms and a “quality gate” workflow (Glue job orchestrated by Step Functions).
+
+</details>
 
 ## Repo layout
 
@@ -592,3 +611,7 @@ Terraform can create CloudWatch alarms + a dashboard via `infra/terraform/module
 - `cloudwatch:PutDashboard`
 
 In that case, set `observability_enabled = false` in `infra/terraform/envs/dev/dev.tfvars:5` and re-apply (this repo defaults it to `true`).
+
+## License
+
+MIT — see `LICENSE`.
