@@ -14,6 +14,7 @@ DATASET = "{{DATASET}}"
 def _load_config() -> Dict[str, Any]:
     # Default config path inside repo packaging; adjust if you package differently.
     # In Lambda, you'll likely ship configs/ into the deployment zip.
+    # Note: this template uses PyYAML; remember to add it to your Lambda requirements/package.
     config_path = os.environ.get("CONFIG_PATH", f"configs/{DATASET}.yaml")
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
