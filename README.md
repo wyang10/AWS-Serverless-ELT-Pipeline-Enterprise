@@ -29,16 +29,16 @@ No VPC/EC2 is required for the minimal path.
 
 ## v1 vs v2.0
 
-| Aspect | v1 (Minimal) |  v2.0 (Enterprise)  |
-|---|---|----|
-| Pipeline | S3 → Lambda → SQS → Lambda → S3 | EventBridge / Step Functions + Glue + GE |
-| Idempotency | DDB object-level lock| Powertools (DynamoDB TTL) + replay / backfill |
-| Recovery | Manual | Replay + DLQ redrive `scripts/.sh` helpers |
-| Queryability | S3 only | Glue Catalog / Crawler + Athena |
-| Data quality | — | Glue Job + Great Expectations gate |
-| Storage | JSONL → Parquet | Parquet + Glue tables (compaction) + Athena |
-| Observability | Logs only | CloudWatch Dashboards + Alarms |
-| CI/CD | Local apply | CI + manual Terraform plan/apply (keys/OIDC) |
+| Aspect | v1 (Minimal) | v2.0 (Enterprise track) |
+|---|---|---|
+| Pipeline | S3 → Lambda → SQS → Lambda → S3 | Same + optional workflows |
+| Idempotency | DynamoDB object-level | Powertools Idempotency (DDB TTL) |
+| Recovery | Basic | Replay + DLQ redrive helpers |
+| Storage | JSONL → Parquet | Same (+ optional compaction job) |
+| Queryability | S3 only | Optional Glue Catalog/Crawler + Athena |
+| Data quality | — | Optional Glue Job + GE gate |
+| Observability | Logs only | Optional CloudWatch dashboards + alarms |
+| CI/CD | Local apply | CI + manual Terraform workflow |
 
 ## Quickstart 
 
@@ -124,3 +124,27 @@ Recommendation: keep `ge_emit_events_from_transform=false` and `ge_eventbridge_e
 ## License
 
 MIT — see `LICENSE`.
+
+## Why “optional” is emphasized
+
+This repo is designed so you can keep a minimal, low-cost baseline (the core S3→Lambda→SQS→Lambda→S3 pipeline) and enable “enterprise” capabilities via Terraform toggles. Marking modules as **optional** avoids misunderstandings when:
+
+- You intentionally keep a capability off (cost, complexity, or permissions).
+- Your org policies block certain APIs (for example, CloudWatch dashboard/alarm writes).
+- You want to demonstrate the architecture and the toggles without implying every deployment has every module enabled.
+
+If you enable a module in your environment, it is valid to describe it as “included in my deployment” in interviews.
+
+## Resume-ready project summary (copy/paste)
+
+**One-liner**
+
+Built a production-lite, serverless ELT framework on AWS (S3 bronze JSONL → Lambda ingest → SQS (+ DLQ) → Lambda transform → S3 silver Parquet) with optional orchestration, catalog/query, and data quality gates.
+
+**Highlights**
+
+- Implemented object-level idempotency using AWS Lambda Powertools Idempotency backed by DynamoDB (conditional writes + TTL) to prevent duplicate ingestion across retries and duplicate events.
+- Designed for reliability with SQS partial batch failure handling, DLQ + redrive tooling, and S3-copy replay for backfills without direct queue access.
+- Produced query-ready Parquet outputs and integrated optional Glue Data Catalog/Crawler so Athena can query the silver layer as tables.
+- Added optional operational workflows (Step Functions) to orchestrate replay/backfill and downstream readiness/quality checks (with optional EventBridge auto-triggering).
+- Delivered infrastructure as code (Terraform modules) and CI automation (pytest + terraform fmt checks; manual Terraform plan/apply workflow supporting OIDC or access keys).
