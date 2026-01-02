@@ -2,7 +2,7 @@
  * @Author: Audrey Yang 97855340+wyang10@users.noreply.github.com
  * @Date: 2026-01-02 00:03:56
  * @LastEditors: Audrey Yang 97855340+wyang10@users.noreply.github.com
- * @LastEditTime: 2026-01-02 01:35:46
+ * @LastEditTime: 2026-01-02 02:24:49
  * @FilePath: /AWS-Serverless-ELT-Pipeline-Enterprise/README-1.md
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 -->
@@ -182,6 +182,12 @@ make verify-seed && make verify-silver
 # Idempotency: same object twice → second invoke skipped>=1
 make verify-idempotency
 
+# End to End Validation
+- `make verify-e2e`
+
+![](<demo/1.png>)
+![](<demo/2.png>)
+![](<demo/3.png>)
 
 ⸻
 
