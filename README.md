@@ -16,6 +16,8 @@ Built a end to end production-lite, serverless ELT framework on AWS (S3 bronze J
 
 ## Architecture
 
+```text
+
 (1) Ingest path (always-on)
 S3 Bronze (jsonl) 
   -> S3:ObjectCreated 
@@ -36,7 +38,6 @@ S3 Silver (parquet)
   -> (optional) Great Expectations validation gate
 
 
-```text
 
 S3 (bronze/*.jsonl)
   └─ ObjectCreated
