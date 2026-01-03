@@ -3,7 +3,7 @@
 
 ## Project Summary
 
-Built a production-lite, serverless ELT framework on AWS (S3 bronze JSONL → Lambda ingest → SQS (+ DLQ) → Lambda transform → S3 silver Parquet) with optional orchestration, catalog/query, quality gates, and observability.
+Built a end to end production-lite, serverless ELT framework on AWS (S3 bronze JSONL → Lambda ingest → SQS (+ DLQ) → Lambda transform → S3 silver Parquet) with optional orchestration, catalog/query, quality gates, and observability.
 
 **Highlights**
 
@@ -37,6 +37,7 @@ S3 Silver (parquet)
 
 
 ```text
+
 S3 (bronze/*.jsonl)
   └─ ObjectCreated
      └─ Lambda ingest (Powertools logs/metrics/idempotency)
@@ -45,6 +46,7 @@ S3 (bronze/*.jsonl)
                  └─ S3 (silver/…/*.parquet)
                      └─ (optional) Glue Catalog/Crawler → Athena
                      └─ (optional) Step Functions → Glue Job (+ Great Expectations gate)
+
 ```
 
 No VPC/EC2 is required for the minimal path.
@@ -68,17 +70,6 @@ This repo is designed so you can keep a minimal, low-cost baseline (the core S3�
 ## v1 vs v2.0
 
 | Aspect | v1 (Minimal) | v2.0 (Enterprise track) |
-|---|---|---|
-| Pipeline | S3 → Lambda → SQS → Lambda → S3 | Same + optional workflows |
-| Idempotency | DynamoDB object-level | Powertools Idempotency (DDB TTL) |
-| Recovery | Basic | Replay + DLQ redrive helpers |
-| Storage | JSONL → Parquet | Same (+ optional compaction job) |
-| Queryability | S3 only | Optional Glue Catalog/Crawler + Athena |
-| Data quality | — | Optional Glue Job + GE gate |
-| Observability | Logs only | Optional CloudWatch dashboards + alarms |
-| CI/CD | Local apply | CI + manual Terraform workflow |
-
-| Aspect | v1 (Minimal) | v2.0 (Enterprise track) |
 |---|---|----|
 | Core pipeline | S3 → Lambda → SQS → Lambda → S3 (Parquet) | Same + production options |
 | Orchestration  | — | EventBridge → Step Functions (replay/backfill + ops/DQ stages) |
@@ -93,6 +84,7 @@ This repo is designed so you can keep a minimal, low-cost baseline (the core S3�
 ## Quickstart 
 
 ```bash
+
 git clone https://github.com/wyang10/AWS-Serverless-ELT-Pipeline-Enterprise.git
 cd AWS-Serverless-ELT-Pipeline-Enterprise
 
@@ -107,6 +99,7 @@ aws sts get-caller-identity
 make build
 make tf-init
 TF_AUTO_APPROVE=1 make tf-apply
+
 ```
 
 Run end-to-end verification (screenshot-able checks):
@@ -144,6 +137,7 @@ Recommendation: keep `ge_emit_events_from_transform=false` and `ge_eventbridge_e
 ## Repo layout 
 
 ```text
+
 .
 ├─ .github/workflows/                 # CI + manual terraform workflow
 ├─ infra/terraform/
@@ -163,6 +157,7 @@ Recommendation: keep `ge_emit_events_from_transform=false` and `ge_eventbridge_e
 ├─ demo/                              # screenshots
 ├─ Instructions.md
 └─ LICENSE
+
 ```
 
 ## Screenshots
