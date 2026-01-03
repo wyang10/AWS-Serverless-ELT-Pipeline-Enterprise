@@ -202,6 +202,7 @@ Reliability features: **object-level idempotency** via Powertools + DynamoDB con
 | 1,000 | 10 | 0.5 | 10 | 20,000 | ~16.48 |
 | 2,000 | 5 | 1.0 | 50 | 10,000 | ~41.20 |
 
+
 > Notes: TB/day is highly sensitive to **object_MB** (your chunking strategy) and **avg_duration_sec** (Parquet write + AWS calls). In practice, stability is governed by quotas (Lambda concurrency), small-file control, and downstream costs.
 
 ## Screenshots
