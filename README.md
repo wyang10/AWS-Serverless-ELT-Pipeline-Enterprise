@@ -67,20 +67,24 @@ No VPC/EC2 is required for the minimal path.
 This repo is designed so you can keep a minimal, low-cost baseline (the core S3→Lambda→SQS→Lambda→S3 pipeline) and enable “enterprise” capabilities via Terraform toggles. Marking modules as **optional** avoids misunderstandings when:
 
 - You intentionally keep a capability off (cost, complexity, or permissions).
+- Your org policies block certain APIs (for example, CloudWatch dashboard/alarm writes).
+- You want to demonstrate the architecture and toggles without implying every deployment has every module enabled.
 
 ## v1 vs v2.0
 
-| Aspect | v1 (Minimal) | v2.0 (Enterprise track) |
-|---|---|----|
-| Core pipeline | S3 → Lambda → SQS → Lambda → S3 (Parquet) | Same + production options |
-| Orchestration  | — | EventBridge → Step Functions (replay/backfill + ops/DQ stages) |
-| Idempotency | DDB object-level lock (`bucket/key#etag`) + TTL | Powertools (DynamoDB + TTL) |
-| Recovery | Manual / ad-hoc | Replay scripts + DLQ redrive helpers (repeatable recovery) |
-| Queryability | S3 only | Glue Catalog/Crawler → Athena tables on Silver Parquet |
-| Data quality | — | Step Functions → Glue Job (+ Great Expectations gate) |
-| Storage / compute | JSONL → Parquet | Parquet + Glue job for compaction/recompute |
-| Observability | CloudWatch logs | Powertools logs + metrics;  CloudWatch dashboards + alarms |
-| CI/CD | Local deploy / manual apply | GitHub Actions CI + Terraform workflow (keys/OIDC) |
+| Aspect | v1 (Minimal) | v2.0 (Production-ready / Enterprise track) |
+|---|---|---|
+| Core pipeline | S3 (bronze JSONL) → Lambda ingest → SQS → Lambda transform → S3 (silver Parquet) | Same core pipeline (keeps it simple & scalable) |
+| Triggers & orchestration | S3 trigger + SQS event source mapping | Same, plus optional Step Functions workflows (manual by default; optional EventBridge schedule/auto-trigger) |
+| Idempotency | Object-level idempotency (DynamoDB + TTL; key = `s3://bucket/key#etag`) | Powertools Idempotency backed by DynamoDB (conditional writes + TTL; same key) |
+| Failure handling | Default retries | SQS partial batch failure handling + DLQ (optional) + replay/redrive scripts (`scripts/replay.sh`, `scripts/redrive.sh`) |
+| Recovery / backfill | Manual replay (ad-hoc) | Repeatable replay/backfill loop (S3-based replay + DLQ redrive), designed for safe reprocessing |
+| Storage format | JSONL → Parquet | JSONL → Parquet with partitioned silver layout (query-friendly) |
+| Queryability | S3 files only | Optional Glue Catalog/Crawler → Athena tables over `silver/<record_type>/dt=.../*.parquet` |
+| Data quality | — | Optional Step Functions task → Glue Job (+ optional Great Expectations gate) |
+| Observability | Logs only | Powertools Logger + Metrics + optional CloudWatch Dashboard + Alarms |
+| IaC / deployment | Terraform apply locally | Terraform modules + CI checks (pytest + terraform fmt) + manual Terraform plan/apply workflow (OIDC preferred; access keys supported) |
+| Extensibility | Manual wiring per dataset | Dataset scaffold (`make scaffold DATASET=...`) generates config/handler/DQ/sample skeletons for new datasets |
 
 ## Quickstart 
 
@@ -170,5 +174,4 @@ Recommendation: keep `ge_emit_events_from_transform=false` and `ge_eventbridge_e
 ## License
 
 MIT — see `LICENSE`.
-
 
