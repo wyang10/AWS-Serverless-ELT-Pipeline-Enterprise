@@ -184,6 +184,26 @@ Recommendation: keep `ge_emit_events_from_transform=false` and `ge_eventbridge_e
 
 ```
 
+## Throughput (Rule-of-thumb)
+
+This pipeline is fully serverless (no VPC/EC2). **SQS carries lightweight pointers (bucket/key/etag), not raw data**, so capacity is usually bounded by **Lambda concurrency + per-batch runtime + your file/chunk size**, rather than “SQS TB limits”. A steady-state estimate is:
+
+- **msg/s ≈ concurrency × batch_size ÷ avg_duration_sec**
+- **TB/day ≈ msg/s × object_MB × 86,400 ÷ 1024 ÷ 1024**
+
+Reliability features: **object-level idempotency** via Powertools + DynamoDB conditional writes + TTL (`bucket/key#etag`), **partial batch failure + DLQ**, plus **S3-copy replay** and **DLQ redrive** tooling for backfills/recovery.
+
+### Quick calculator examples
+
+| concurrency | batch_size | avg_duration_sec | object_MB | msg/s (≈ c×b/d) | TB/day (≈ msg/s×MB×86400/1024²) |
+|---:|---:|---:|---:|---:|---:|
+| 200 | 10 | 1.0 | 5 | 2,000 | ~0.82 |
+| 500 | 10 | 0.5 | 5 | 10,000 | ~4.12 |
+| 1,000 | 10 | 0.5 | 10 | 20,000 | ~16.48 |
+| 2,000 | 5 | 1.0 | 50 | 10,000 | ~41.20 |
+
+> Notes: TB/day is highly sensitive to **object_MB** (your chunking strategy) and **avg_duration_sec** (Parquet write + AWS calls). In practice, stability is governed by quotas (Lambda concurrency), small-file control, and downstream costs.
+
 ## Screenshots
 
 ![](demo/1.png)
