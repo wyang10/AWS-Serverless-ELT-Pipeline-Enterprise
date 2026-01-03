@@ -38,15 +38,34 @@ S3 Silver (parquet)
   -> (optional) Great Expectations validation gate
 
 
+### Architecture (straight-line)
 
 S3 (bronze/*.jsonl)
   └─ ObjectCreated
-     └─ Lambda ingest (Powertools logs/metrics/idempotency)
-         └─ SQS (events) + DLQ (optional)
+     └─ Lambda ingest
+         ├─ Powertools: Logger / Metrics
+         ├─ Powertools Idempotency (DynamoDB, key = bucket/key#etag, TTL)
+         └─ SQS (events) [+ DLQ optional]
              └─ Lambda transform (Parquet writer)
+                 ├─ Powertools: Logger / Metrics
                  └─ S3 (silver/…/*.parquet)
-                     └─ (optional) Glue Catalog/Crawler → Athena
-                     └─ (optional) Step Functions → Glue Job (+ Great Expectations gate)
+                     ├─ (optional) Glue Catalog/Crawler → Athena (query as tables)
+                     └─ (optional) EventBridge → Step Functions → Glue Job (+ optional Great Expectations gate)
+
+
+
+### Architecture (with optional branches)
+
+S3 (bronze/*.jsonl)
+  └─ Lambda ingest (Powertools logs/metrics + idempotency via DynamoDB TTL)
+      └─ SQS (events) + DLQ (optional)
+          └─ Lambda transform (Parquet writer; Powertools logs/metrics)
+              └─ S3 (silver/…/*.parquet)
+                  ├─ Branch A (Queryability, optional)
+                  │    └─ Glue Catalog/Crawler → Athena tables
+                  └─ Branch B (Ops / DQ workflows, optional)
+                       └─ EventBridge → Step Functions
+                             └─ Task: Glue Job (+ optional Great Expectations gate)
 
 ```
 
